@@ -1,0 +1,7 @@
+-- Local/CI development seed data. Applied automatically by `supabase db reset` after all
+-- migrations run. Intentionally minimal in FASE 0 -- there is no product data yet to seed
+-- (employees/epis/deliveries arrive in FASE 1/2). This file exists mainly so `db reset`
+-- has a defined, empty-but-present seed step from day one, and as the place FASE 1+ will
+-- add representative dev fixtures (a couple of sample organizations/companies) once those
+-- tables exist -- do not put real/production-like personal data (CPF, phone, etc.) here
+-- even for local dev, per docs/architecture.md §16.

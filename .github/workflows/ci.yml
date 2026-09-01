@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# This workflow is the authoritative verification gate for this repo. No Docker is
+# available on the developer's machine (see docs/mvp-roadmap.md FASE 0 / memory
+# feedback-epi-no-docker), so `supabase db reset` + the pgTAP suite run ONLY here --
+# nothing about tenant isolation, RLS, or the migration set is trusted until this job is
+# green. No migration merges without having been proven against a real, ephemeral
+# Postgres carrying the actual `auth` schema, even though no developer machine runs one.
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: App (lint, typecheck, build, unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  database:
+    name: Database (migrations from zero + pgTAP tenant isolation suite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.116.0
+
+      - name: Start local Supabase stack
+        run: supabase start
+
+      - name: Apply every migration from a clean database + seed
+        run: supabase db reset
+
+      - name: Run pgTAP suite (schema invariants + tenant isolation)
+        run: supabase test db
+
+      - name: Stop local Supabase stack
+        if: always()
+        run: supabase stop

@@ -1,0 +1,39 @@
+import { redirect } from "next/navigation";
+import { verifySession, getMyCompanies } from "@/lib/supabase/dal";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmployeeCreateForm } from "./employee-form";
+
+export default async function NewEmployeePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ company?: string }>;
+}) {
+  const session = await verifySession();
+  if (!session.isAuthenticated) {
+    redirect("/login");
+  }
+
+  const companies = await getMyCompanies();
+  const { company: companyParam } = await searchParams;
+  const company = companies.find((c) => c.id === companyParam) ?? (companies.length === 1 ? companies[0]! : null);
+
+  if (!company) {
+    redirect("/employees");
+  }
+
+  return (
+    <main className="flex flex-1 flex-col gap-6 p-8">
+      <h1 className="text-2xl font-semibold tracking-tight">Novo funcionário</h1>
+      <p className="text-sm text-muted-foreground">{company.legalName}</p>
+
+      <Card className="max-w-lg">
+        <CardHeader>
+          <CardTitle>Dados do funcionário</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <EmployeeCreateForm companyId={company.id} />
+        </CardContent>
+      </Card>
+    </main>
+  );
+}
