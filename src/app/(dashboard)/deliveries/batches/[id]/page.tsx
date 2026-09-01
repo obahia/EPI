@@ -4,6 +4,9 @@ import { verifySession, getDeliveryBatch, getBatchDeliveries } from "@/lib/supab
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DeliveryStatusBadge } from "@/components/delivery-status-badge";
+import { StatItem } from "@/components/stat-item";
+import { getLocale } from "@/i18n/get-locale";
+import { getDictionary } from "@/i18n/dictionaries";
 import { ResendBatchPanel } from "./resend-panel";
 
 export default async function DeliveryBatchPage({ params }: { params: Promise<{ id: string }> }) {
@@ -12,6 +15,7 @@ export default async function DeliveryBatchPage({ params }: { params: Promise<{ 
     redirect("/login");
   }
 
+  const t = getDictionary(await getLocale());
   const { id } = await params;
   const [batch, deliveries] = await Promise.all([getDeliveryBatch(id), getBatchDeliveries(id)]);
   if (!batch) {
@@ -23,23 +27,23 @@ export default async function DeliveryBatchPage({ params }: { params: Promise<{ 
   const pendingCount = batch.totalCount - batch.confirmedCount - batch.contestedCount - batch.cancelledCount;
 
   return (
-    <main className="flex flex-1 flex-col gap-6 p-8">
+    <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Lote de {new Date(`${batch.deliveryDate}T00:00:00`).toLocaleDateString("pt-BR")}
+        <h1 className="font-heading text-2xl font-medium tracking-tight">
+          {t.deliveries.batchOfPrefix} {new Date(`${batch.deliveryDate}T00:00:00`).toLocaleDateString("pt-BR")}
         </h1>
         <Link
           href="/deliveries/batches"
           className="text-sm text-muted-foreground underline-offset-4 hover:underline"
         >
-          Voltar para lotes
+          {t.deliveries.backToBatches}
         </Link>
       </div>
 
       {batch.note ? (
         <Card className="max-w-3xl">
           <CardHeader>
-            <CardTitle>Observação</CardTitle>
+            <CardTitle>{t.common.note}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-sm">{batch.note}</p>
@@ -49,15 +53,15 @@ export default async function DeliveryBatchPage({ params }: { params: Promise<{ 
 
       <Card className="max-w-3xl">
         <CardHeader>
-          <CardTitle>Resumo</CardTitle>
+          <CardTitle>{t.deliveries.summaryTitle}</CardTitle>
         </CardHeader>
         <CardContent>
           <dl className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-            <StatItem label="Total" value={batch.totalCount} />
-            <StatItem label="Confirmadas" value={batch.confirmedCount} />
-            <StatItem label="Pendentes" value={pendingCount} />
-            <StatItem label="Contestadas" value={batch.contestedCount} />
-            <StatItem label="Canceladas" value={batch.cancelledCount} />
+            <StatItem label={t.deliveries.totalColumn} value={batch.totalCount} />
+            <StatItem label={t.deliveries.confirmedColumn} value={batch.confirmedCount} />
+            <StatItem label={t.deliveries.pendingColumn} value={pendingCount} />
+            <StatItem label={t.deliveries.contestedColumn} value={batch.contestedCount} />
+            <StatItem label={t.deliveries.cancelledColumn} value={batch.cancelledCount} />
           </dl>
         </CardContent>
       </Card>
@@ -66,14 +70,14 @@ export default async function DeliveryBatchPage({ params }: { params: Promise<{ 
 
       <Card>
         <CardHeader>
-          <CardTitle>Entregas</CardTitle>
+          <CardTitle>{t.nav.deliveries}</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Funcionário</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>{t.deliveries.employeeColumn}</TableHead>
+                <TableHead>{t.common.status}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -94,14 +98,5 @@ export default async function DeliveryBatchPage({ params }: { params: Promise<{ 
         </CardContent>
       </Card>
     </main>
-  );
-}
-
-function StatItem({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex flex-col gap-1 rounded-md border p-3">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="text-xl font-semibold tabular-nums">{value}</dd>
-    </div>
   );
 }

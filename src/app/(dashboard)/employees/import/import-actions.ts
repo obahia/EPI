@@ -7,6 +7,8 @@ import { isValidCpf, onlyDigits, maskCpf } from "@/lib/br/cpf";
 import { normalizePhoneE164 } from "@/lib/br/phone";
 import { hashCpf, encryptCpf } from "@/lib/crypto/cpf-secrets";
 import { describeRpcError } from "@/lib/supabase/rpc-error";
+import { getLocale } from "@/i18n/get-locale";
+import { getDictionary } from "@/i18n/dictionaries";
 
 // The RPC itself hard-caps at 20,000 rows/call (batch_too_large, 54000) -- this is a much
 // smaller per-request ceiling so a single Server Action invocation's body stays well under
@@ -45,14 +47,18 @@ export async function commitEmployeeImportChunk(
   companyId: string,
   rows: ImportCommitRow[],
 ): Promise<ImportChunkResult> {
+  const t = getDictionary(await getLocale());
   if (!z.uuid().safeParse(companyId).success) {
-    return { ok: false, error: "Empresa inválida." };
+    return { ok: false, error: t.employees.invalidCompany };
   }
   if (rows.length === 0) {
     return { ok: true, created: 0, updated: 0, skipped: 0 };
   }
   if (rows.length > MAX_ROWS_PER_CALL) {
-    return { ok: false, error: `Máximo de ${MAX_ROWS_PER_CALL} linhas por lote.` };
+    return {
+      ok: false,
+      error: `${t.employees.maxRowsPerBatchPrefix} ${MAX_ROWS_PER_CALL} ${t.employees.maxRowsPerBatchSuffix}`,
+    };
   }
 
   const payload: Record<string, string | null>[] = [];
@@ -99,7 +105,7 @@ export async function commitEmployeeImportChunk(
   });
 
   if (error) {
-    return { ok: false, error: describeRpcError(error, "Falha ao importar um dos lotes.") };
+    return { ok: false, error: describeRpcError(error, t.employees.importChunkFailed) };
   }
 
   const result = Array.isArray(data) ? data[0] : data;

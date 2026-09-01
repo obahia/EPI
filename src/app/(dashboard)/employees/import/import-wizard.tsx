@@ -8,6 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { useLocale, useT } from "@/i18n/provider";
+import type { Dict } from "@/i18n/dictionaries";
 import {
   IMPORT_FIELDS,
   REQUIRED_IMPORT_FIELDS,
@@ -28,15 +30,17 @@ const MAX_TOTAL_ROWS = 20_000;
 // MAX_ROWS_PER_CALL in import-actions.ts.
 const CHUNK_SIZE = 2000;
 
-const FIELD_LABELS: Record<ImportField, string> = {
-  full_name: "Nome completo",
-  cpf: "CPF",
-  registration_number: "Matrícula",
-  phone: "Telefone",
-  email: "E-mail",
-  position_title: "Cargo",
-  department: "Departamento",
-};
+function fieldLabels(t: Dict): Record<ImportField, string> {
+  return {
+    full_name: t.employees.fullNameLabel,
+    cpf: t.employees.cpfLabel,
+    registration_number: t.employees.registrationNumberLabel,
+    phone: t.employees.phoneLabel,
+    email: t.common.email,
+    position_title: t.employees.positionLabel,
+    department: t.employees.departmentLabel,
+  };
+}
 
 // Loose header-name guesses to pre-fill the mapping step -- purely a UX convenience, the
 // user reviews and can override every field before validating.
@@ -68,8 +72,8 @@ function guessMapping(headers: string[]): ColumnMapping {
   return mapping;
 }
 
-function errorsToCsv(errors: ValidationResult["errors"]): string {
-  const lines = ["linha,motivo"];
+function errorsToCsv(errors: ValidationResult["errors"], t: Dict): string {
+  const lines = [`${t.employees.rowLabel},${t.employees.reasonLabel}`];
   for (const e of errors) {
     lines.push(`${e.rowNumber},"${e.reasons.join("; ").replace(/"/g, '""')}"`);
   }
@@ -96,6 +100,9 @@ type Step = "upload" | "map" | "review" | "committing" | "done";
 type CommitProgress = { processedChunks: number; totalChunks: number; created: number; updated: number; skipped: number };
 
 export function ImportWizard({ companyId }: { companyId: string }) {
+  const t = useT();
+  const locale = useLocale();
+  const FIELD_LABELS = fieldLabels(t);
   const [step, setStep] = useState<Step>("upload");
   const [fileName, setFileName] = useState<string | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -120,7 +127,7 @@ export function ImportWizard({ companyId }: { companyId: string }) {
       skipEmptyLines: true,
       complete: (results) => {
         if (!results.meta.fields || results.meta.fields.length === 0) {
-          setParseError("Não foi possível ler colunas neste arquivo. Confira se a primeira linha tem cabeçalhos.");
+          setParseError(t.employees.importNoColumnsError);
           return;
         }
         setHeaders(results.meta.fields);
@@ -129,7 +136,7 @@ export function ImportWizard({ companyId }: { companyId: string }) {
         setStep("map");
       },
       error: (err: Error) => {
-        setParseError(`Falha ao ler o arquivo: ${err.message}`);
+        setParseError(`${t.employees.importReadFailedPrefix} ${err.message}`);
       },
     });
   }
@@ -171,7 +178,9 @@ export function ImportWizard({ companyId }: { companyId: string }) {
       );
 
       if (!result.ok) {
-        setCommitError(`${result.error} (lote ${i + 1} de ${chunks.length} -- os lotes anteriores já foram salvos)`);
+        setCommitError(
+          `${result.error} (${t.employees.batch.toLowerCase()} ${i + 1} ${t.employees.ofConnector} ${chunks.length} -- ${t.employees.batchErrorNote})`,
+        );
         setProgress({ processedChunks: i, totalChunks: chunks.length, created, updated, skipped });
         setStep("done");
         return;
@@ -191,11 +200,8 @@ export function ImportWizard({ companyId }: { companyId: string }) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>1. Enviar arquivo</CardTitle>
-          <CardDescription>
-            Arquivo .csv com uma linha de cabeçalho. Nada é enviado ao servidor nesta etapa -- a leitura acontece no
-            seu navegador.
-          </CardDescription>
+          <CardTitle>{t.employees.importStep1Title}</CardTitle>
+          <CardDescription>{t.employees.importStep1Description}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <input
@@ -204,7 +210,11 @@ export function ImportWizard({ companyId }: { companyId: string }) {
             onChange={handleFileChange}
             className="text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground"
           />
-          {fileName ? <p className="text-sm text-muted-foreground">Arquivo: {fileName}</p> : null}
+          {fileName ? (
+            <p className="text-sm text-muted-foreground">
+              {t.employees.importFileLabel} {fileName}
+            </p>
+          ) : null}
           {parseError ? <p className="text-sm text-destructive">{parseError}</p> : null}
         </CardContent>
       </Card>
@@ -215,8 +225,10 @@ export function ImportWizard({ companyId }: { companyId: string }) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>2. Mapear colunas</CardTitle>
-          <CardDescription>{rows.length} linha(s) encontradas em {fileName}. Nome e CPF são obrigatórios.</CardDescription>
+          <CardTitle>{t.employees.importStep2Title}</CardTitle>
+          <CardDescription>
+            {rows.length} {t.employees.importRowsFoundSuffix} {fileName}. {t.employees.importNameAndCpfRequired}
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -232,7 +244,7 @@ export function ImportWizard({ companyId }: { companyId: string }) {
                   value={mapping[field] ?? ""}
                   onChange={(e) => setMapping((m) => ({ ...m, [field]: e.target.value || undefined }))}
                 >
-                  <option value="">— não importar —</option>
+                  <option value="">{t.employees.importDoNotImport}</option>
                   {headers.map((h) => (
                     <option key={h} value={h}>
                       {h}
@@ -244,7 +256,9 @@ export function ImportWizard({ companyId }: { companyId: string }) {
           </div>
 
           <div>
-            <p className="mb-2 text-sm font-medium">Pré-visualização (primeiras {previewRows.length} linhas)</p>
+            <p className="mb-2 text-sm font-medium">
+              {t.employees.importPreviewPrefix} {previewRows.length} {t.employees.importPreviewSuffix}
+            </p>
             <div className="overflow-x-auto rounded-md border">
               <Table>
                 <TableHeader>
@@ -269,10 +283,10 @@ export function ImportWizard({ companyId }: { companyId: string }) {
 
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setStep("upload")}>
-              Voltar
+              {t.common.back}
             </Button>
             <Button onClick={runValidation} disabled={!mappingComplete}>
-              Validar
+              {t.employees.validate}
             </Button>
           </div>
         </CardContent>
@@ -285,33 +299,38 @@ export function ImportWizard({ companyId }: { companyId: string }) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>3. Revisar</CardTitle>
+          <CardTitle>{t.employees.importStep3Title}</CardTitle>
           <CardDescription>
-            {validation.validRows.length} linha(s) válida(s), {validation.errors.length} com erro.
+            {validation.validRows.length} {t.employees.importValidRowsSuffix} {validation.errors.length}{" "}
+            {t.employees.importErrorRowsSuffix}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           {overCap ? (
             <p className="text-sm text-destructive">
-              O arquivo tem mais de {MAX_TOTAL_ROWS.toLocaleString("pt-BR")} linhas válidas. Divida o arquivo em
-              partes menores e importe cada uma separadamente.
+              {t.employees.importOverCapPrefix} {MAX_TOTAL_ROWS.toLocaleString(locale === "pt" ? "pt-BR" : "en-US")}{" "}
+              {t.employees.importOverCapSuffix}
             </p>
           ) : null}
 
           {validation.errors.length > 0 ? (
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">Linhas com erro</p>
-                <Button size="sm" variant="outline" onClick={() => downloadCsv("erros-importacao.csv", errorsToCsv(validation.errors))}>
-                  Baixar relatório de erros
+                <p className="text-sm font-medium">{t.employees.importErrorRowsTitle}</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => downloadCsv("erros-importacao.csv", errorsToCsv(validation.errors, t))}
+                >
+                  {t.employees.downloadErrorReport}
                 </Button>
               </div>
               <div className="max-h-64 overflow-y-auto rounded-md border">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Linha</TableHead>
-                      <TableHead>Motivo</TableHead>
+                      <TableHead>{t.employees.rowLabel}</TableHead>
+                      <TableHead>{t.employees.reasonLabel}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -329,10 +348,10 @@ export function ImportWizard({ companyId }: { companyId: string }) {
 
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setStep("map")}>
-              Voltar
+              {t.common.back}
             </Button>
             <Button onClick={commitImport} disabled={validation.validRows.length === 0 || overCap}>
-              Confirmar importação
+              {t.employees.confirmImport}
             </Button>
           </div>
         </CardContent>
@@ -344,11 +363,13 @@ export function ImportWizard({ companyId }: { companyId: string }) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Importando…</CardTitle>
+          <CardTitle>{t.employees.importing}</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            {progress ? `Lote ${progress.processedChunks} de ${progress.totalChunks}…` : "Preparando…"}
+            {progress
+              ? `${t.employees.batch} ${progress.processedChunks} ${t.employees.ofConnector} ${progress.totalChunks}…`
+              : t.employees.preparing}
           </p>
         </CardContent>
       </Card>
@@ -359,17 +380,17 @@ export function ImportWizard({ companyId }: { companyId: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Importação concluída</CardTitle>
+        <CardTitle>{t.employees.importComplete}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <p className="text-sm">
-          {progress?.created ?? 0} criados, {progress?.updated ?? 0} atualizados
-          {progress && progress.skipped > 0 ? `, ${progress.skipped} ignorados na revalidação` : ""}.
+          {progress?.created ?? 0} {t.employees.createdSuffix} {progress?.updated ?? 0} {t.employees.updatedSuffix}
+          {progress && progress.skipped > 0 ? `, ${progress.skipped} ${t.employees.skippedSuffix}` : ""}.
         </p>
         {commitError ? <p className="text-sm text-destructive">{commitError}</p> : null}
         <div>
           <Button asChild>
-            <Link href={`/employees?company=${companyId}`}>Ver funcionários</Link>
+            <Link href={`/employees?company=${companyId}`}>{t.companies.viewEmployees}</Link>
           </Button>
         </div>
       </CardContent>

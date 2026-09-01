@@ -1,8 +1,13 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { AlertCircle, Activity } from "lucide-react";
 import { verifySession, getCompany, getDashboardSummary, getCompanyAuditEvents } from "@/lib/supabase/dal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AuditTimeline } from "@/app/(dashboard)/deliveries/[id]/audit-timeline";
+import { StatItem } from "@/components/stat-item";
+import { EmptyState } from "@/components/empty-state";
+import { getLocale } from "@/i18n/get-locale";
+import { getDictionary } from "@/i18n/dictionaries";
 
 /**
  * Operational dashboard (docs/mvp-roadmap.md FASE 6): plain labeled numbers answering
@@ -16,6 +21,7 @@ export default async function CompanyDashboardPage({ params }: { params: Promise
     redirect("/login");
   }
 
+  const t = getDictionary(await getLocale());
   const { id } = await params;
   const [company, summary, auditEvents] = await Promise.all([
     getCompany(id),
@@ -27,40 +33,40 @@ export default async function CompanyDashboardPage({ params }: { params: Promise
   }
 
   return (
-    <main className="flex flex-1 flex-col gap-6 p-8">
+    <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Painel operacional</h1>
+        <h1 className="font-heading text-2xl font-medium tracking-tight">{t.companies.operationalDashboard}</h1>
         <p className="text-sm text-muted-foreground">{company.legalName}</p>
         <Link
           href={`/companies/${company.id}`}
           className="text-sm text-muted-foreground underline-offset-4 hover:underline"
         >
-          Voltar para a empresa
+          {t.companies.backToCompany}
         </Link>
       </div>
 
       {summary ? (
         <Card>
           <CardHeader>
-            <CardTitle>Números dos últimos 30 dias</CardTitle>
+            <CardTitle>{t.companies.last30DaysStats}</CardTitle>
           </CardHeader>
           <CardContent>
             <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <StatItem label="Funcionários ativos" value={summary.activeEmployeesCount} />
-              <StatItem label="Entregas no período" value={summary.deliveriesInPeriod} />
-              <StatItem label="Confirmadas" value={summary.confirmedCount} />
-              <StatItem label="Aguardando" value={summary.pendingCount} />
-              <StatItem label="Contestadas" value={summary.contestedCount} />
-              <StatItem label="Canceladas" value={summary.cancelledCount} />
-              <StatItem label="Pendentes há mais de 3 dias" value={summary.pendingOver3DaysCount} />
-              <StatItem label="Pendentes há mais de 7 dias" value={summary.pendingOver7DaysCount} />
+              <StatItem label={t.companies.activeEmployees} value={summary.activeEmployeesCount} />
+              <StatItem label={t.companies.deliveriesInPeriod} value={summary.deliveriesInPeriod} />
+              <StatItem label={t.companies.confirmedLabel} value={summary.confirmedCount} />
+              <StatItem label={t.companies.pendingLabel} value={summary.pendingCount} />
+              <StatItem label={t.companies.contestedLabel} value={summary.contestedCount} />
+              <StatItem label={t.companies.cancelledLabel} value={summary.cancelledCount} />
+              <StatItem label={t.companies.pendingOver3Days} value={summary.pendingOver3DaysCount} />
+              <StatItem label={t.companies.pendingOver7Days} value={summary.pendingOver7DaysCount} />
             </dl>
           </CardContent>
         </Card>
       ) : (
         <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            Não foi possível carregar os números do painel.
+          <CardContent>
+            <EmptyState icon={AlertCircle} message={t.companies.dashboardLoadError} />
           </CardContent>
         </Card>
       )}
@@ -68,10 +74,10 @@ export default async function CompanyDashboardPage({ params }: { params: Promise
       {auditEvents.length === 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle>Últimas atividades</CardTitle>
+            <CardTitle>{t.companies.recentActivity}</CardTitle>
           </CardHeader>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            Nenhuma atividade registrada ainda.
+          <CardContent>
+            <EmptyState icon={Activity} message={t.companies.noActivityYet} />
           </CardContent>
         </Card>
       ) : (
@@ -81,14 +87,5 @@ export default async function CompanyDashboardPage({ params }: { params: Promise
         <AuditTimeline events={auditEvents} />
       )}
     </main>
-  );
-}
-
-function StatItem({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex flex-col gap-1 rounded-md border p-3">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="text-xl font-semibold tabular-nums">{value}</dd>
-    </div>
   );
 }

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { Employee, Epi } from "@/lib/supabase/dal";
+import { useT } from "@/i18n/provider";
 import { createDelivery, type DeliveryFormState } from "../actions";
 
 const initialState: DeliveryFormState = { error: null };
@@ -40,6 +41,7 @@ export function DeliveryCreateForm({
   employees: Employee[];
   epis: Epi[];
 }) {
+  const t = useT();
   const [state, formAction, pending] = useActionState(createDelivery, initialState);
   const idPrefix = useId();
   const [rows, setRows] = useState<ItemRow[]>([{ key: `${idPrefix}-0` }]);
@@ -58,10 +60,10 @@ export function DeliveryCreateForm({
       <input type="hidden" name="companyId" value={companyId} />
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="employeeId">Funcionário</Label>
+        <Label htmlFor="employeeId">{t.deliveries.employeeColumn}</Label>
         <select id="employeeId" name="employeeId" required defaultValue="" className={selectClassName}>
           <option value="" disabled>
-            Selecione um funcionário
+            {t.deliveries.selectEmployeePlaceholder}
           </option>
           {employees.map((emp) => (
             <option key={emp.id} value={emp.id}>
@@ -70,22 +72,22 @@ export function DeliveryCreateForm({
           ))}
         </select>
         {employees.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhum funcionário cadastrado nesta empresa ainda.</p>
+          <p className="text-sm text-muted-foreground">{t.deliveries.noEmployeesForCompany}</p>
         ) : null}
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="deliveryDate">Data da entrega</Label>
+        <Label htmlFor="deliveryDate">{t.deliveries.deliveryDateLabel}</Label>
         <Input id="deliveryDate" name="deliveryDate" type="date" defaultValue={todayIso()} required />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="note">Observação</Label>
+        <Label htmlFor="note">{t.common.note}</Label>
         <Input id="note" name="note" />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label>Itens</Label>
+        <Label>{t.deliveries.itemsLabel}</Label>
         <div className="flex flex-col gap-2">
           {rows.map((row, i) => (
             <div key={row.key} className="flex items-center gap-2">
@@ -93,11 +95,11 @@ export function DeliveryCreateForm({
                 name="epiId"
                 required
                 defaultValue=""
-                aria-label={`EPI do item ${i + 1}`}
+                aria-label={`${t.deliveries.itemEpiAriaLabelPrefix} ${i + 1}`}
                 className={selectClassName}
               >
                 <option value="" disabled>
-                  Selecione um EPI
+                  {t.deliveries.selectEpiPlaceholder}
                 </option>
                 {epis.map((epi) => (
                   <option key={epi.id} value={epi.id}>
@@ -112,7 +114,7 @@ export function DeliveryCreateForm({
                 max={10000}
                 defaultValue={1}
                 required
-                aria-label={`Quantidade do item ${i + 1}`}
+                aria-label={`${t.deliveries.itemQuantityAriaLabelPrefix} ${i + 1}`}
                 className="w-24"
               />
               <Button
@@ -122,23 +124,23 @@ export function DeliveryCreateForm({
                 onClick={() => removeRow(row.key)}
                 disabled={rows.length === 1}
               >
-                Remover
+                {t.common.remove}
               </Button>
             </div>
           ))}
         </div>
         {epis.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhum EPI ativo no catálogo desta empresa ainda.</p>
+          <p className="text-sm text-muted-foreground">{t.deliveries.noActiveEpisForCompany}</p>
         ) : null}
         <Button type="button" variant="outline" size="sm" onClick={addRow} className="self-start">
-          Adicionar item
+          {t.deliveries.addItem}
         </Button>
       </div>
 
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
 
       <Button type="submit" disabled={pending || employees.length === 0 || epis.length === 0}>
-        {pending ? "Criando…" : "Criar entrega"}
+        {pending ? t.deliveries.creating : t.deliveries.createDelivery}
       </Button>
     </form>
   );

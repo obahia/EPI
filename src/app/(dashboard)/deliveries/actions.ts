@@ -6,19 +6,14 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { describeRpcError } from "@/lib/supabase/rpc-error";
 import { generateWorkerToken, hashWorkerToken } from "@/lib/crypto/worker-token";
+import { getLocale } from "@/i18n/get-locale";
+import { getDictionary } from "@/i18n/dictionaries";
 
 export type DeliveryFormState = { error: string | null };
 
 const itemSchema = z.object({
   epiId: z.uuid(),
   quantity: z.coerce.number().int().min(1).max(10000),
-});
-
-const createSchema = z.object({
-  companyId: z.uuid(),
-  employeeId: z.uuid("Selecione um funcionário."),
-  deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida."),
-  note: z.string().trim().max(2000).optional(),
 });
 
 /**
@@ -29,6 +24,14 @@ const createSchema = z.object({
  * omitted from the payload so the RPC defaults each line to the EPI's own default_unit.
  */
 export async function createDelivery(_prevState: DeliveryFormState, formData: FormData): Promise<DeliveryFormState> {
+  const t = getDictionary(await getLocale());
+  const createSchema = z.object({
+    companyId: z.uuid(),
+    employeeId: z.uuid(t.deliveries.selectEmployee),
+    deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, t.deliveries.invalidDate),
+    note: z.string().trim().max(2000).optional(),
+  });
+
   const parsed = createSchema.safeParse({
     companyId: formData.get("companyId"),
     employeeId: formData.get("employeeId"),
@@ -37,21 +40,21 @@ export async function createDelivery(_prevState: DeliveryFormState, formData: Fo
   });
 
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+    return { error: parsed.error.issues[0]?.message ?? t.deliveries.invalidData };
   }
 
   const epiIds = formData.getAll("epiId");
   const quantities = formData.getAll("quantity");
 
   if (epiIds.length === 0) {
-    return { error: "A entrega precisa de pelo menos um item." };
+    return { error: t.deliveries.atLeastOneItem };
   }
 
   const items: { epi_id: string; quantity: number }[] = [];
   for (let i = 0; i < epiIds.length; i++) {
     const parsedItem = itemSchema.safeParse({ epiId: epiIds[i], quantity: quantities[i] });
     if (!parsedItem.success) {
-      return { error: "Selecione um EPI e uma quantidade válida (1 a 10.000) em cada item." };
+      return { error: t.deliveries.invalidItemLine };
     }
     items.push({ epi_id: parsedItem.data.epiId, quantity: parsedItem.data.quantity });
   }
@@ -66,7 +69,7 @@ export async function createDelivery(_prevState: DeliveryFormState, formData: Fo
   });
 
   if (error) {
-    return { error: describeRpcError(error, "Não foi possível criar a entrega.") };
+    return { error: describeRpcError(error, t.deliveries.createFailed) };
   }
 
   revalidatePath("/deliveries");
@@ -78,16 +81,17 @@ const idSchema = z.object({ deliveryId: z.uuid() });
 /** DRAFT -> ISSUED. A distinct user action/RPC call from creation on purpose -- the DRAFT
  * state is real, not collapsed away, even if the UI moves through it quickly. */
 export async function issueDelivery(_prevState: DeliveryFormState, formData: FormData): Promise<DeliveryFormState> {
+  const t = getDictionary(await getLocale());
   const parsed = idSchema.safeParse({ deliveryId: formData.get("deliveryId") });
   if (!parsed.success) {
-    return { error: "Dados inválidos." };
+    return { error: t.deliveries.invalidData };
   }
 
   const supabase = await createClient();
   const { error } = await supabase.schema("api").rpc("issue_delivery", { p_delivery_id: parsed.data.deliveryId });
 
   if (error) {
-    return { error: describeRpcError(error, "Não foi possível emitir a entrega.") };
+    return { error: describeRpcError(error, t.deliveries.issueFailed) };
   }
 
   revalidatePath("/deliveries");
@@ -103,12 +107,13 @@ const cancelSchema = z.object({
  * (CONFIRMED/CONTESTED/SUPERSEDED) -- the RPC itself is the enforcement, this is just the
  * button that's only rendered for the two statuses where it can legally succeed. */
 export async function cancelDelivery(_prevState: DeliveryFormState, formData: FormData): Promise<DeliveryFormState> {
+  const t = getDictionary(await getLocale());
   const parsed = cancelSchema.safeParse({
     deliveryId: formData.get("deliveryId"),
     reason: formData.get("reason") || undefined,
   });
   if (!parsed.success) {
-    return { error: "Dados inválidos." };
+    return { error: t.deliveries.invalidData };
   }
 
   const supabase = await createClient();
@@ -118,7 +123,7 @@ export async function cancelDelivery(_prevState: DeliveryFormState, formData: Fo
   });
 
   if (error) {
-    return { error: describeRpcError(error, "Não foi possível cancelar a entrega.") };
+    return { error: describeRpcError(error, t.deliveries.cancelFailed) };
   }
 
   revalidatePath("/deliveries");
@@ -140,9 +145,10 @@ export async function createConfirmationLink(
   _prevState: ConfirmationLinkState,
   formData: FormData,
 ): Promise<ConfirmationLinkState> {
+  const t = getDictionary(await getLocale());
   const parsed = createLinkSchema.safeParse({ deliveryId: formData.get("deliveryId") });
   if (!parsed.success) {
-    return { error: "Dados inválidos.", path: null, expiresAt: null };
+    return { error: t.deliveries.invalidData, path: null, expiresAt: null };
   }
 
   const token = generateWorkerToken();
@@ -159,7 +165,7 @@ export async function createConfirmationLink(
     .single();
 
   if (error || !data) {
-    return { error: describeRpcError(error!, "Não foi possível gerar o link de confirmação."), path: null, expiresAt: null };
+    return { error: describeRpcError(error!, t.deliveries.linkFailed), path: null, expiresAt: null };
   }
 
   revalidatePath(`/deliveries/${parsed.data.deliveryId}`);
@@ -170,22 +176,23 @@ export async function createConfirmationLink(
 
 export type ResolveContestState = { error: string | null };
 
-const resolveContestSchema = z.object({
-  contestId: z.uuid(),
-  deliveryId: z.uuid(),
-  resolutionNote: z.string().trim().min(3, "Escreva uma resposta com pelo menos 3 caracteres.").max(2000),
-});
-
 /** Records the manager's written response to a contest (CONTEST_RESPONDED in the audit
  * trail) -- does not change the delivery's status, see api.resolve_contest's comment. */
 export async function resolveContest(_prevState: ResolveContestState, formData: FormData): Promise<ResolveContestState> {
+  const t = getDictionary(await getLocale());
+  const resolveContestSchema = z.object({
+    contestId: z.uuid(),
+    deliveryId: z.uuid(),
+    resolutionNote: z.string().trim().min(3, t.deliveries.resolveContestMin).max(2000),
+  });
+
   const parsed = resolveContestSchema.safeParse({
     contestId: formData.get("contestId"),
     deliveryId: formData.get("deliveryId"),
     resolutionNote: formData.get("resolutionNote"),
   });
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+    return { error: parsed.error.issues[0]?.message ?? t.deliveries.invalidData };
   }
 
   const supabase = await createClient();
@@ -195,7 +202,7 @@ export async function resolveContest(_prevState: ResolveContestState, formData: 
   });
 
   if (error) {
-    return { error: describeRpcError(error, "Não foi possível registrar a resposta.") };
+    return { error: describeRpcError(error, t.deliveries.resolveContestFailed) };
   }
 
   revalidatePath(`/deliveries/${parsed.data.deliveryId}`);

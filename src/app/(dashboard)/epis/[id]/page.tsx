@@ -1,6 +1,8 @@
 import { notFound, redirect } from "next/navigation";
 import { verifySession, getEpi } from "@/lib/supabase/dal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getLocale } from "@/i18n/get-locale";
+import { getDictionary } from "@/i18n/dictionaries";
 import { EpiEditForm } from "./epi-edit-form";
 
 export default async function EpiPage({
@@ -15,6 +17,7 @@ export default async function EpiPage({
     redirect("/login");
   }
 
+  const t = getDictionary(await getLocale());
   const { id } = await params;
   const epi = await getEpi(id);
   if (!epi) {
@@ -25,15 +28,17 @@ export default async function EpiPage({
   const returnCompanyId = companyParam ?? epi.companyId ?? "";
 
   return (
-    <main className="flex flex-1 flex-col gap-6 p-8">
+    <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{epi.name}</h1>
-        <p className="font-mono text-sm text-muted-foreground">CA {epi.caNumber}</p>
+        <h1 className="font-heading text-2xl font-medium tracking-tight">{epi.name}</h1>
+        <p className="font-mono text-sm text-muted-foreground">
+          {t.epis.caLabel} {epi.caNumber}
+        </p>
       </div>
 
       <Card className="max-w-lg">
         <CardHeader>
-          <CardTitle>Editar EPI</CardTitle>
+          <CardTitle>{t.epis.editEpiTitle}</CardTitle>
         </CardHeader>
         <CardContent>
           <EpiEditForm epi={epi} returnCompanyId={returnCompanyId} />

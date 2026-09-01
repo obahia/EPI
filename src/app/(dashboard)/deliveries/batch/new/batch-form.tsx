@@ -7,6 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { Employee, Epi } from "@/lib/supabase/dal";
+import { useT } from "@/i18n/provider";
+import type { Dict } from "@/i18n/dictionaries";
 import { createDeliveryBatch, type CreateBatchState } from "../../batch-actions";
 
 const initialState: CreateBatchState = { error: null, links: null, batchId: null };
@@ -24,11 +26,13 @@ function todayIso(): string {
   return `${y}-${m}-${d}`;
 }
 
-const EMPLOYEE_STATUS_LABEL: Record<Employee["status"], string> = {
-  ACTIVE: "Ativo",
-  ON_LEAVE: "Afastado",
-  TERMINATED: "Desligado",
-};
+function employeeStatusLabel(t: Dict): Record<Employee["status"], string> {
+  return {
+    ACTIVE: t.deliveries.employeeStatusActive,
+    ON_LEAVE: t.deliveries.employeeStatusOnLeave,
+    TERMINATED: t.deliveries.employeeStatusTerminated,
+  };
+}
 
 type ItemRow = { key: string };
 
@@ -53,6 +57,7 @@ export function BatchCreateForm({
   employees: Employee[];
   epis: Epi[];
 }) {
+  const t = useT();
   const [state, formAction, pending] = useActionState(createDeliveryBatch, initialState);
   const idPrefix = useId();
   const [rows, setRows] = useState<ItemRow[]>([{ key: `${idPrefix}-0` }]);
@@ -60,6 +65,8 @@ export function BatchCreateForm({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [origin] = useState<string | null>(() => (typeof window === "undefined" ? null : window.location.origin));
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
+
+  const statusLabel = employeeStatusLabel(t);
 
   function addRow() {
     setRows((prev) => [...prev, { key: `${idPrefix}-${nextRowIndex.current++}` }]);
@@ -101,7 +108,8 @@ export function BatchCreateForm({
     return (
       <div className="flex flex-col gap-4">
         <p className="text-sm">
-          Lote criado com {state.links.length} {state.links.length === 1 ? "entrega" : "entregas"}.
+          {t.deliveries.batchCreatedPrefix} {state.links.length}{" "}
+          {state.links.length === 1 ? t.deliveries.deliverySingular : t.deliveries.deliveryPlural}.
         </p>
         <div className="flex flex-col gap-2">
           {state.links.map((link) => {
@@ -111,7 +119,7 @@ export function BatchCreateForm({
                 <span className="w-48 shrink-0 truncate text-sm">{link.employeeFullName}</span>
                 <Input readOnly value={url} onFocus={(e) => e.currentTarget.select()} className="font-mono text-xs" />
                 <Button type="button" variant="outline" size="sm" onClick={() => handleCopy(link.path)}>
-                  {copiedPath === link.path ? "Copiado" : "Copiar"}
+                  {copiedPath === link.path ? t.common.copied : t.common.copy}
                 </Button>
               </div>
             );
@@ -119,7 +127,7 @@ export function BatchCreateForm({
         </div>
         {state.batchId ? (
           <Button asChild variant="outline" className="self-start">
-            <Link href={`/deliveries/batches/${state.batchId}`}>Ver lote</Link>
+            <Link href={`/deliveries/batches/${state.batchId}`}>{t.deliveries.viewBatch}</Link>
           </Button>
         ) : null}
       </div>
@@ -131,17 +139,17 @@ export function BatchCreateForm({
       <input type="hidden" name="companyId" value={companyId} />
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="deliveryDate">Data da entrega</Label>
+        <Label htmlFor="deliveryDate">{t.deliveries.deliveryDateLabel}</Label>
         <Input id="deliveryDate" name="deliveryDate" type="date" defaultValue={todayIso()} required />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="note">Observação</Label>
+        <Label htmlFor="note">{t.common.note}</Label>
         <Input id="note" name="note" />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label>Itens</Label>
+        <Label>{t.deliveries.itemsLabel}</Label>
         <div className="flex flex-col gap-2">
           {rows.map((row, i) => (
             <div key={row.key} className="flex items-center gap-2">
@@ -149,11 +157,11 @@ export function BatchCreateForm({
                 name="epiId"
                 required
                 defaultValue=""
-                aria-label={`EPI do item ${i + 1}`}
+                aria-label={`${t.deliveries.itemEpiAriaLabelPrefix} ${i + 1}`}
                 className={selectClassName}
               >
                 <option value="" disabled>
-                  Selecione um EPI
+                  {t.deliveries.selectEpiPlaceholder}
                 </option>
                 {epis.map((epi) => (
                   <option key={epi.id} value={epi.id}>
@@ -168,7 +176,7 @@ export function BatchCreateForm({
                 max={10000}
                 defaultValue={1}
                 required
-                aria-label={`Quantidade do item ${i + 1}`}
+                aria-label={`${t.deliveries.itemQuantityAriaLabelPrefix} ${i + 1}`}
                 className="w-24"
               />
               <Button
@@ -178,27 +186,28 @@ export function BatchCreateForm({
                 onClick={() => removeRow(row.key)}
                 disabled={rows.length === 1}
               >
-                Remover
+                {t.common.remove}
               </Button>
             </div>
           ))}
         </div>
         {epis.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhum EPI ativo no catálogo desta empresa ainda.</p>
+          <p className="text-sm text-muted-foreground">{t.deliveries.noActiveEpisForCompany}</p>
         ) : null}
         <Button type="button" variant="outline" size="sm" onClick={addRow} className="self-start">
-          Adicionar item
+          {t.deliveries.addItem}
         </Button>
       </div>
 
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Label>
-            Funcionários ({selectedIds.size} {selectedIds.size === 1 ? "selecionado" : "selecionados"})
+            {t.deliveries.employeesLabel} ({selectedIds.size}{" "}
+            {selectedIds.size === 1 ? t.deliveries.selectedSingular : t.deliveries.selectedPlural})
           </Label>
           <div className="flex gap-2">
             <Button type="button" variant="outline" size="sm" onClick={selectAllActive}>
-              Selecionar todos os ativos
+              {t.deliveries.selectAllActive}
             </Button>
             <Button
               type="button"
@@ -207,7 +216,7 @@ export function BatchCreateForm({
               onClick={clearSelection}
               disabled={selectedIds.size === 0}
             >
-              Limpar seleção
+              {t.common.clearSelection}
             </Button>
           </div>
         </div>
@@ -222,13 +231,13 @@ export function BatchCreateForm({
                   className="size-4"
                 />
                 <span className="flex-1">{emp.fullName}</span>
-                <span className="text-xs text-muted-foreground">{EMPLOYEE_STATUS_LABEL[emp.status]}</span>
+                <span className="text-xs text-muted-foreground">{statusLabel[emp.status]}</span>
               </label>
             </li>
           ))}
         </ul>
         {employees.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhum funcionário cadastrado nesta empresa ainda.</p>
+          <p className="text-sm text-muted-foreground">{t.deliveries.noEmployeesForCompany}</p>
         ) : null}
       </div>
 
@@ -245,7 +254,7 @@ export function BatchCreateForm({
         type="submit"
         disabled={pending || employees.length === 0 || epis.length === 0 || selectedEmployees.length === 0}
       >
-        {pending ? "Criando…" : "Criar lote"}
+        {pending ? t.deliveries.creating : t.deliveries.createBatch}
       </Button>
     </form>
   );

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isValidCpf } from "@/lib/br/cpf";
+import { useT } from "@/i18n/provider";
 import { createEmployee, type EmployeeFormState } from "../actions";
 
 const initialState: EmployeeFormState = { error: null };
@@ -16,6 +17,7 @@ const initialState: EmployeeFormState = { error: null };
  * can't smuggle an invalid CPF through.
  */
 export function EmployeeCreateForm({ companyId }: { companyId: string }) {
+  const t = useT();
   const [state, formAction, pending] = useActionState(createEmployee, initialState);
   const [cpf, setCpf] = useState("");
   const cpfInvalid = cpf.length > 0 && !isValidCpf(cpf);
@@ -25,53 +27,53 @@ export function EmployeeCreateForm({ companyId }: { companyId: string }) {
       <input type="hidden" name="companyId" value={companyId} />
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="fullName">Nome completo</Label>
+        <Label htmlFor="fullName">{t.employees.fullNameLabel}</Label>
         <Input id="fullName" name="fullName" required />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="cpf">CPF</Label>
+        <Label htmlFor="cpf">{t.employees.cpfLabel}</Label>
         <Input
           id="cpf"
           name="cpf"
           required
-          placeholder="000.000.000-00"
+          placeholder={t.employees.cpfPlaceholder}
           aria-invalid={cpfInvalid}
           value={cpf}
           onChange={(e) => setCpf(e.target.value)}
         />
-        {cpfInvalid ? <p className="text-sm text-destructive">CPF inválido.</p> : null}
+        {cpfInvalid ? <p className="text-sm text-destructive">{t.employees.invalidCpfMessage}</p> : null}
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="registrationNumber">Matrícula</Label>
+        <Label htmlFor="registrationNumber">{t.employees.registrationNumberLabel}</Label>
         <Input id="registrationNumber" name="registrationNumber" />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="phone">Telefone</Label>
-        <Input id="phone" name="phone" placeholder="(11) 98765-4321" />
+        <Label htmlFor="phone">{t.employees.phoneLabel}</Label>
+        <Input id="phone" name="phone" placeholder={t.employees.phonePlaceholder} />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="email">E-mail</Label>
+        <Label htmlFor="email">{t.common.email}</Label>
         <Input id="email" name="email" type="email" />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="positionTitle">Cargo</Label>
+        <Label htmlFor="positionTitle">{t.employees.positionLabel}</Label>
         <Input id="positionTitle" name="positionTitle" />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="department">Departamento</Label>
+        <Label htmlFor="department">{t.employees.departmentLabel}</Label>
         <Input id="department" name="department" />
       </div>
 
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
 
       <Button type="submit" disabled={pending || cpfInvalid}>
-        {pending ? "Salvando…" : "Cadastrar funcionário"}
+        {pending ? t.employees.saving : t.employees.registerEmployee}
       </Button>
     </form>
   );

@@ -15,6 +15,7 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    setupFiles: ["./src/test/setup.ts"],
     // Playwright specs live in e2e/ and use @playwright/test, not vitest —
     // keep the two runners from picking up each other's files.
     exclude: [...configDefaults.exclude, "e2e/**"],

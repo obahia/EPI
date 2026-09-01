@@ -6,15 +6,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { Employee } from "@/lib/supabase/dal";
+import { useT } from "@/i18n/provider";
 import { updateEmployee, type EmployeeFormState } from "../actions";
 
 const initialState: EmployeeFormState = { error: null };
-
-const STATUS_OPTIONS: { value: Employee["status"]; label: string }[] = [
-  { value: "ACTIVE", label: "Ativo" },
-  { value: "ON_LEAVE", label: "Afastado" },
-  { value: "TERMINATED", label: "Desligado" },
-];
 
 // Matches the shadcn Input's visual style -- no shadcn Select component is installed yet
 // in this project, and pulling one in for a single dropdown is more than FASE 1 needs.
@@ -26,7 +21,14 @@ const selectClassName = cn(
 /** CPF is intentionally not editable here -- there is no CPF-edit path in FASE 1 (see
  * api.update_employee's own comment). */
 export function EmployeeEditForm({ employee }: { employee: Employee }) {
+  const t = useT();
   const [state, formAction, pending] = useActionState(updateEmployee, initialState);
+
+  const statusOptions: { value: Employee["status"]; label: string }[] = [
+    { value: "ACTIVE", label: t.employees.statusActive },
+    { value: "ON_LEAVE", label: t.employees.statusOnLeave },
+    { value: "TERMINATED", label: t.employees.statusTerminated },
+  ];
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
@@ -34,39 +36,44 @@ export function EmployeeEditForm({ employee }: { employee: Employee }) {
       <input type="hidden" name="companyId" value={employee.companyId} />
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="fullName">Nome completo</Label>
+        <Label htmlFor="fullName">{t.employees.fullNameLabel}</Label>
         <Input id="fullName" name="fullName" defaultValue={employee.fullName} required />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="registrationNumber">Matrícula</Label>
+        <Label htmlFor="registrationNumber">{t.employees.registrationNumberLabel}</Label>
         <Input id="registrationNumber" name="registrationNumber" defaultValue={employee.registrationNumber ?? ""} />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="phone">Telefone</Label>
-        <Input id="phone" name="phone" defaultValue={employee.phoneE164 ?? ""} placeholder="(11) 98765-4321" />
+        <Label htmlFor="phone">{t.employees.phoneLabel}</Label>
+        <Input
+          id="phone"
+          name="phone"
+          defaultValue={employee.phoneE164 ?? ""}
+          placeholder={t.employees.phonePlaceholder}
+        />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="email">E-mail</Label>
+        <Label htmlFor="email">{t.common.email}</Label>
         <Input id="email" name="email" type="email" defaultValue={employee.email ?? ""} />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="positionTitle">Cargo</Label>
+        <Label htmlFor="positionTitle">{t.employees.positionLabel}</Label>
         <Input id="positionTitle" name="positionTitle" defaultValue={employee.positionTitle ?? ""} />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="department">Departamento</Label>
+        <Label htmlFor="department">{t.employees.departmentLabel}</Label>
         <Input id="department" name="department" defaultValue={employee.department ?? ""} />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="status">Status</Label>
+        <Label htmlFor="status">{t.common.status}</Label>
         <select id="status" name="status" defaultValue={employee.status} className={selectClassName}>
-          {STATUS_OPTIONS.map((opt) => (
+          {statusOptions.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>
@@ -77,7 +84,7 @@ export function EmployeeEditForm({ employee }: { employee: Employee }) {
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
 
       <Button type="submit" disabled={pending}>
-        {pending ? "Salvando…" : "Salvar alterações"}
+        {pending ? t.employees.saving : t.employees.saveChanges}
       </Button>
     </form>
   );

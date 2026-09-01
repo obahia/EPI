@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Building2 } from "lucide-react";
 import { verifySession, getMyCompanies } from "@/lib/supabase/dal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/empty-state";
+import { getLocale } from "@/i18n/get-locale";
+import { getDictionary } from "@/i18n/dictionaries";
 
 /**
  * Company list. Most users (a DIRECT org's ORG_ADMIN) have exactly one company, so this
@@ -15,6 +19,7 @@ export default async function CompaniesPage() {
     redirect("/login");
   }
 
+  const t = getDictionary(await getLocale());
   const companies = await getMyCompanies();
 
   if (companies.length === 1) {
@@ -22,16 +27,16 @@ export default async function CompaniesPage() {
   }
 
   return (
-    <main className="flex flex-1 flex-col gap-6 p-8">
-      <h1 className="text-2xl font-semibold tracking-tight">Empresas</h1>
+    <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
+      <h1 className="font-heading text-2xl font-medium tracking-tight">{t.nav.companies}</h1>
 
       <Card>
         <CardHeader>
-          <CardTitle>Suas empresas</CardTitle>
+          <CardTitle>{t.companies.yourCompanies}</CardTitle>
         </CardHeader>
         <CardContent>
           {companies.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhuma empresa ainda.</p>
+            <EmptyState icon={Building2} message={t.companies.noCompaniesYet} />
           ) : (
             <ul className="flex flex-col gap-2 text-sm">
               {companies.map((c) => (

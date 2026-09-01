@@ -8,19 +8,10 @@ import { isValidCpf, onlyDigits, maskCpf } from "@/lib/br/cpf";
 import { normalizePhoneE164 } from "@/lib/br/phone";
 import { hashCpf, encryptCpf } from "@/lib/crypto/cpf-secrets";
 import { describeRpcError } from "@/lib/supabase/rpc-error";
+import { getLocale } from "@/i18n/get-locale";
+import { getDictionary } from "@/i18n/dictionaries";
 
 export type EmployeeFormState = { error: string | null };
-
-const createSchema = z.object({
-  companyId: z.uuid(),
-  fullName: z.string().trim().min(2, "Nome muito curto").max(150),
-  cpf: z.string().refine(isValidCpf, "CPF inválido"),
-  registrationNumber: z.string().trim().max(40).optional(),
-  phone: z.string().trim().optional(),
-  email: z.email("E-mail inválido").optional().or(z.literal("")),
-  positionTitle: z.string().trim().max(120).optional(),
-  department: z.string().trim().max(120).optional(),
-});
 
 /**
  * Manual employee creation. CPF handling per docs/architecture.md §6/§8: validate
@@ -29,6 +20,18 @@ const createSchema = z.object({
  * api.create_employee itself (only cpf_hash_b64/cpf_enc_b64/cpf_masked do).
  */
 export async function createEmployee(_prevState: EmployeeFormState, formData: FormData): Promise<EmployeeFormState> {
+  const t = getDictionary(await getLocale());
+  const createSchema = z.object({
+    companyId: z.uuid(),
+    fullName: z.string().trim().min(2, t.employees.nameTooShort).max(150),
+    cpf: z.string().refine(isValidCpf, t.employees.invalidCpf),
+    registrationNumber: z.string().trim().max(40).optional(),
+    phone: z.string().trim().optional(),
+    email: z.email(t.employees.invalidEmail).optional().or(z.literal("")),
+    positionTitle: z.string().trim().max(120).optional(),
+    department: z.string().trim().max(120).optional(),
+  });
+
   const parsed = createSchema.safeParse({
     companyId: formData.get("companyId"),
     fullName: formData.get("fullName"),
@@ -41,14 +44,14 @@ export async function createEmployee(_prevState: EmployeeFormState, formData: Fo
   });
 
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+    return { error: parsed.error.issues[0]?.message ?? t.employees.invalidData };
   }
 
   let phoneE164: string | null = null;
   if (parsed.data.phone) {
     phoneE164 = normalizePhoneE164(parsed.data.phone);
     if (!phoneE164) {
-      return { error: "Telefone inválido." };
+      return { error: t.employees.invalidPhone };
     }
   }
 
@@ -72,29 +75,30 @@ export async function createEmployee(_prevState: EmployeeFormState, formData: Fo
   });
 
   if (error) {
-    return { error: describeRpcError(error, "Não foi possível cadastrar o funcionário.") };
+    return { error: describeRpcError(error, t.employees.createFailed) };
   }
 
   revalidatePath("/employees");
   redirect(`/employees?company=${parsed.data.companyId}`);
 }
 
-const updateSchema = z.object({
-  employeeId: z.uuid(),
-  companyId: z.uuid(),
-  fullName: z.string().trim().min(2, "Nome muito curto").max(150),
-  registrationNumber: z.string().trim().max(40).optional(),
-  phone: z.string().trim().optional(),
-  email: z.email("E-mail inválido").optional().or(z.literal("")),
-  positionTitle: z.string().trim().max(120).optional(),
-  department: z.string().trim().max(120).optional(),
-  status: z.enum(["ACTIVE", "ON_LEAVE", "TERMINATED"]),
-});
-
 /** Updates editable employee fields via api.update_employee. Never touches CPF -- there
  * is no CPF-edit path in FASE 1, by design (see the RPC's own comment in
  * supabase/migrations/20260831150200_employee_rpcs.sql). */
 export async function updateEmployee(_prevState: EmployeeFormState, formData: FormData): Promise<EmployeeFormState> {
+  const t = getDictionary(await getLocale());
+  const updateSchema = z.object({
+    employeeId: z.uuid(),
+    companyId: z.uuid(),
+    fullName: z.string().trim().min(2, t.employees.nameTooShort).max(150),
+    registrationNumber: z.string().trim().max(40).optional(),
+    phone: z.string().trim().optional(),
+    email: z.email(t.employees.invalidEmail).optional().or(z.literal("")),
+    positionTitle: z.string().trim().max(120).optional(),
+    department: z.string().trim().max(120).optional(),
+    status: z.enum(["ACTIVE", "ON_LEAVE", "TERMINATED"]),
+  });
+
   const parsed = updateSchema.safeParse({
     employeeId: formData.get("employeeId"),
     companyId: formData.get("companyId"),
@@ -108,14 +112,14 @@ export async function updateEmployee(_prevState: EmployeeFormState, formData: Fo
   });
 
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+    return { error: parsed.error.issues[0]?.message ?? t.employees.invalidData };
   }
 
   let phoneE164: string | null = null;
   if (parsed.data.phone) {
     phoneE164 = normalizePhoneE164(parsed.data.phone);
     if (!phoneE164) {
-      return { error: "Telefone inválido." };
+      return { error: t.employees.invalidPhone };
     }
   }
 
@@ -132,7 +136,7 @@ export async function updateEmployee(_prevState: EmployeeFormState, formData: Fo
   });
 
   if (error) {
-    return { error: describeRpcError(error, "Não foi possível salvar as alterações.") };
+    return { error: describeRpcError(error, t.employees.saveFailed) };
   }
 
   revalidatePath("/employees");

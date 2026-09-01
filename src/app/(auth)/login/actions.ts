@@ -3,11 +3,21 @@
 import { z } from "zod";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getLocale } from "@/i18n/get-locale";
+import { getDictionary } from "@/i18n/dictionaries";
 
 const credentialsSchema = z.object({
   email: z.email(),
   password: z.string().min(8),
 });
+
+const signUpSchema = z
+  .object({
+    email: z.email(),
+    password: z.string().min(8),
+    passwordConfirm: z.string().min(8),
+  })
+  .refine((data) => data.password === data.passwordConfirm, { path: ["passwordConfirm"] });
 
 export type AuthActionState = { error: string | null };
 
@@ -19,15 +29,16 @@ export type AuthActionState = { error: string | null };
  * load-bearing, only that it goes through Supabase Auth + getClaims().
  */
 export async function signIn(_prevState: AuthActionState, formData: FormData): Promise<AuthActionState> {
+  const t = getDictionary(await getLocale());
   const parsed = credentialsSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
-    return { error: "E-mail ou senha inválidos." };
+    return { error: t.auth.invalidCredentials };
   }
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
   if (error) {
-    return { error: "Não foi possível entrar. Confira e-mail e senha." };
+    return { error: t.auth.signInError };
   }
 
   redirect("/dashboard");
@@ -39,15 +50,17 @@ export async function signIn(_prevState: AuthActionState, formData: FormData): P
  * auto-provisions the matching app.users row on the database side.
  */
 export async function signUp(_prevState: AuthActionState, formData: FormData): Promise<AuthActionState> {
-  const parsed = credentialsSchema.safeParse(Object.fromEntries(formData));
+  const t = getDictionary(await getLocale());
+  const parsed = signUpSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
-    return { error: "E-mail ou senha inválidos (mínimo 8 caracteres)." };
+    const mismatch = parsed.error.issues.some((i) => i.path[0] === "passwordConfirm");
+    return { error: mismatch ? t.auth.resetMismatch : t.auth.invalidCredentialsMin };
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signUp(parsed.data);
+  const { error } = await supabase.auth.signUp({ email: parsed.data.email, password: parsed.data.password });
   if (error) {
-    return { error: "Não foi possível criar a conta." };
+    return { error: t.auth.signUpError };
   }
 
   redirect("/dashboard");

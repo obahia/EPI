@@ -1,9 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Layers } from "lucide-react";
 import { verifySession, getMyCompanies, getDeliveryBatches } from "@/lib/supabase/dal";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CompanyChooser } from "@/components/company-chooser";
+import { EmptyState } from "@/components/empty-state";
+import { getLocale } from "@/i18n/get-locale";
+import { getDictionary, type Dict } from "@/i18n/dictionaries";
 
 export default async function DeliveryBatchesPage({
   searchParams,
@@ -15,6 +20,7 @@ export default async function DeliveryBatchesPage({
     redirect("/login");
   }
 
+  const t = getDictionary(await getLocale());
   const companies = await getMyCompanies();
   if (companies.length === 0) {
     redirect("/dashboard");
@@ -25,63 +31,45 @@ export default async function DeliveryBatchesPage({
     companies.find((c) => c.id === companyParam) ?? (companies.length === 1 ? companies[0]! : null);
 
   return (
-    <main className="flex flex-1 flex-col gap-6 p-8">
+    <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Lotes de entrega</h1>
+          <h1 className="font-heading text-2xl font-medium tracking-tight">{t.deliveries.batchesTitle}</h1>
           <Link href="/deliveries" className="text-sm text-muted-foreground underline-offset-4 hover:underline">
-            Voltar para entregas
+            {t.deliveries.backToDeliveries}
           </Link>
         </div>
         {activeCompany ? (
           <Button asChild>
-            <Link href={`/deliveries/batch/new?company=${activeCompany.id}`}>Novo lote</Link>
+            <Link href={`/deliveries/batch/new?company=${activeCompany.id}`}>{t.deliveries.newBatch}</Link>
           </Button>
         ) : null}
       </div>
 
-      {companies.length > 1 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Empresa</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="flex flex-wrap gap-2 text-sm">
-              {companies.map((c) => (
-                <li key={c.id}>
-                  <Link
-                    href={`/deliveries/batches?company=${c.id}`}
-                    className={
-                      "rounded-md border px-3 py-1.5" +
-                      (activeCompany?.id === c.id ? " border-primary bg-primary/5 font-medium" : "")
-                    }
-                  >
-                    {c.legalName}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      ) : null}
+      <CompanyChooser
+        companies={companies}
+        activeCompanyId={activeCompany?.id}
+        basePath="/deliveries/batches"
+        title={t.deliveries.companyCardTitle}
+      />
 
       {!activeCompany ? (
-        <p className="text-sm text-muted-foreground">Selecione uma empresa para ver seus lotes.</p>
+        <p className="text-sm text-muted-foreground">{t.deliveries.selectCompanyPromptBatches}</p>
       ) : (
-        <BatchTable companyId={activeCompany.id} />
+        <BatchTable companyId={activeCompany.id} t={t} />
       )}
     </main>
   );
 }
 
-async function BatchTable({ companyId }: { companyId: string }) {
+async function BatchTable({ companyId, t }: { companyId: string; t: Dict }) {
   const batches = await getDeliveryBatches(companyId);
 
   if (batches.length === 0) {
     return (
       <Card>
-        <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          Nenhum lote criado ainda. Use “Novo lote” para começar.
+        <CardContent>
+          <EmptyState icon={Layers} message={t.deliveries.noBatchesYet} />
         </CardContent>
       </Card>
     );
@@ -93,12 +81,12 @@ async function BatchTable({ companyId }: { companyId: string }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Data da entrega</TableHead>
-              <TableHead>Total</TableHead>
-              <TableHead>Confirmadas</TableHead>
-              <TableHead>Contestadas</TableHead>
-              <TableHead>Canceladas</TableHead>
-              <TableHead>Criado em</TableHead>
+              <TableHead>{t.deliveries.deliveryDateLabel}</TableHead>
+              <TableHead>{t.deliveries.totalColumn}</TableHead>
+              <TableHead>{t.deliveries.confirmedColumn}</TableHead>
+              <TableHead>{t.deliveries.contestedColumn}</TableHead>
+              <TableHead>{t.deliveries.cancelledColumn}</TableHead>
+              <TableHead>{t.deliveries.createdAtColumn}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

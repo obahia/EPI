@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useT } from "@/i18n/provider";
 import { resendBatchPending, type ResendBatchState } from "../../batch-actions";
 
 const initialState: ResendBatchState = { error: null, links: null };
@@ -15,6 +16,7 @@ const initialState: ResendBatchState = { error: null, links: null };
  * redirecting away before the manager can copy them.
  */
 export function ResendBatchPanel({ batchId }: { batchId: string }) {
+  const t = useT();
   const [state, formAction, pending] = useActionState(resendBatchPending, initialState);
   const [origin] = useState<string | null>(() => (typeof window === "undefined" ? null : window.location.origin));
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
@@ -28,20 +30,20 @@ export function ResendBatchPanel({ batchId }: { batchId: string }) {
   return (
     <Card className="max-w-3xl">
       <CardHeader>
-        <CardTitle>Reenviar pendentes</CardTitle>
+        <CardTitle>{t.deliveries.resendPendingTitle}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <form action={formAction} className="flex flex-col gap-2">
           <input type="hidden" name="batchId" value={batchId} />
           {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
           <Button type="submit" disabled={pending} className="self-start">
-            {pending ? "Reenviando…" : "Reenviar pendentes"}
+            {pending ? t.deliveries.resending : t.deliveries.resendPendingTitle}
           </Button>
         </form>
 
         {state.links !== null ? (
           state.links.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhuma entrega pendente para reenviar.</p>
+            <p className="text-sm text-muted-foreground">{t.deliveries.noPendingToResend}</p>
           ) : (
             <div className="flex flex-col gap-2">
               {state.links.map((link) => {
@@ -56,7 +58,7 @@ export function ResendBatchPanel({ batchId }: { batchId: string }) {
                       className="font-mono text-xs"
                     />
                     <Button type="button" variant="outline" size="sm" onClick={() => handleCopy(link.path)}>
-                      {copiedPath === link.path ? "Copiado" : "Copiar"}
+                      {copiedPath === link.path ? t.common.copied : t.common.copy}
                     </Button>
                   </div>
                 );

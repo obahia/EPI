@@ -1,19 +1,16 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { ShieldCheck } from "lucide-react";
 import { verifySession, getMyCompanies, getEpis } from "@/lib/supabase/dal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CompanyChooser } from "@/components/company-chooser";
+import { EmptyState } from "@/components/empty-state";
+import { getLocale } from "@/i18n/get-locale";
+import { getDictionary, type Dict } from "@/i18n/dictionaries";
 import { toggleEpiActive } from "./actions";
-
-const UNIT_LABEL: Record<string, string> = {
-  UN: "Unidade",
-  PAR: "Par",
-  CX: "Caixa",
-  M: "Metro",
-  KG: "Quilo",
-};
 
 export default async function EpisPage({
   searchParams,
@@ -25,6 +22,7 @@ export default async function EpisPage({
     redirect("/login");
   }
 
+  const t = getDictionary(await getLocale());
   const companies = await getMyCompanies();
   if (companies.length === 0) {
     redirect("/dashboard");
@@ -35,58 +33,48 @@ export default async function EpisPage({
     companies.find((c) => c.id === companyParam) ?? (companies.length === 1 ? companies[0]! : null);
 
   return (
-    <main className="flex flex-1 flex-col gap-6 p-8">
+    <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Catálogo de EPIs</h1>
+        <h1 className="font-heading text-2xl font-medium tracking-tight">{t.epis.catalogTitle}</h1>
         {activeCompany ? (
           <Button asChild>
-            <Link href={`/epis/new?company=${activeCompany.id}`}>Novo EPI</Link>
+            <Link href={`/epis/new?company=${activeCompany.id}`}>{t.epis.newEpi}</Link>
           </Button>
         ) : null}
       </div>
 
-      {companies.length > 1 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Empresa</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="flex flex-wrap gap-2 text-sm">
-              {companies.map((c) => (
-                <li key={c.id}>
-                  <Link
-                    href={`/epis?company=${c.id}`}
-                    className={
-                      "rounded-md border px-3 py-1.5" +
-                      (activeCompany?.id === c.id ? " border-primary bg-primary/5 font-medium" : "")
-                    }
-                  >
-                    {c.legalName}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      ) : null}
+      <CompanyChooser
+        companies={companies}
+        activeCompanyId={activeCompany?.id}
+        basePath="/epis"
+        title={t.epis.companyCardTitle}
+      />
 
       {!activeCompany ? (
-        <p className="text-sm text-muted-foreground">Selecione uma empresa para ver seu catálogo de EPIs.</p>
+        <p className="text-sm text-muted-foreground">{t.epis.selectCompanyPrompt}</p>
       ) : (
-        <EpiTable companyId={activeCompany.id} />
+        <EpiTable companyId={activeCompany.id} t={t} />
       )}
     </main>
   );
 }
 
-async function EpiTable({ companyId }: { companyId: string }) {
+async function EpiTable({ companyId, t }: { companyId: string; t: Dict }) {
   const epis = await getEpis(companyId);
+
+  const UNIT_LABEL: Record<string, string> = {
+    UN: t.epis.unitUn,
+    PAR: t.epis.unitPar,
+    CX: t.epis.unitCx,
+    M: t.epis.unitM,
+    KG: t.epis.unitKg,
+  };
 
   if (epis.length === 0) {
     return (
       <Card>
-        <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          Nenhum EPI cadastrado ainda. Use “Novo EPI” para começar.
+        <CardContent>
+          <EmptyState icon={ShieldCheck} message={t.epis.noEpisYet} />
         </CardContent>
       </Card>
     );
@@ -98,14 +86,14 @@ async function EpiTable({ companyId }: { companyId: string }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Nome</TableHead>
-              <TableHead>CA</TableHead>
-              <TableHead>Fabricante</TableHead>
-              <TableHead>Modelo</TableHead>
-              <TableHead>Unidade</TableHead>
-              <TableHead>Origem</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">Ações</TableHead>
+              <TableHead>{t.common.name}</TableHead>
+              <TableHead>{t.epis.caLabel}</TableHead>
+              <TableHead>{t.epis.manufacturerLabel}</TableHead>
+              <TableHead>{t.epis.modelLabel}</TableHead>
+              <TableHead>{t.epis.unitColumn}</TableHead>
+              <TableHead>{t.epis.originColumn}</TableHead>
+              <TableHead>{t.common.status}</TableHead>
+              <TableHead className="text-right">{t.common.actions}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -120,9 +108,11 @@ async function EpiTable({ companyId }: { companyId: string }) {
                 <TableCell>{epi.manufacturer ?? "—"}</TableCell>
                 <TableCell>{epi.model ?? "—"}</TableCell>
                 <TableCell>{UNIT_LABEL[epi.defaultUnit] ?? epi.defaultUnit}</TableCell>
-                <TableCell>{epi.companyId === null ? "Organização" : "Esta empresa"}</TableCell>
+                <TableCell>{epi.companyId === null ? t.epis.originOrg : t.epis.originCompany}</TableCell>
                 <TableCell>
-                  <Badge variant={epi.isActive ? "default" : "outline"}>{epi.isActive ? "Ativo" : "Inativo"}</Badge>
+                  <Badge variant={epi.isActive ? "default" : "outline"}>
+                    {epi.isActive ? t.epis.statusActive : t.epis.statusInactive}
+                  </Badge>
                 </TableCell>
                 <TableCell className="text-right">
                   <form action={toggleEpiActive}>
@@ -130,7 +120,7 @@ async function EpiTable({ companyId }: { companyId: string }) {
                     <input type="hidden" name="companyId" value={companyId} />
                     <input type="hidden" name="isActive" value={(!epi.isActive).toString()} />
                     <Button type="submit" size="sm" variant="outline">
-                      {epi.isActive ? "Desativar" : "Ativar"}
+                      {epi.isActive ? t.epis.deactivate : t.epis.activate}
                     </Button>
                   </form>
                 </TableCell>

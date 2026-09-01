@@ -1,25 +1,30 @@
 import type { AssuranceLevel, AuditEvent, ConfirmationRequestStatus, DeliveryContest } from "@/lib/supabase/dal";
+import type { Dict } from "@/i18n/dictionaries";
 
-// pt-BR labels for the manager-facing confirmation/contest/audit UI. Kept as pure lookups
-// (same pattern as delivery-status-badge.tsx's DELIVERY_STATUS_META) so they're trivial to
-// extend as FASE 4 introduces the remaining assurance levels / event types.
+// Locale-aware labels for the manager-facing confirmation/contest/audit UI. Kept as pure
+// lookups (same pattern as delivery-status-badge.tsx's DELIVERY_STATUS_META) so they're
+// trivial to extend as FASE 4 introduces the remaining assurance levels / event types --
+// each takes the current dictionary so callers (Server Components with getDictionary(), or
+// Client Components with useT()) can produce a translated Record.
 
 /** All 11 app.confirmation_request_status values, even though FASE 3 only ever produces
  * SENT/VIEWED/IDENTITY_FAILED/CONFIRMED/CONTESTED/EXPIRED/REVOKED -- PENDING/IDENTITY_PENDING/
  * IDENTITY_VERIFIED/DELIVERY_FAILED are reachable in theory from the same rows this page reads. */
-export const CONFIRMATION_STATUS_LABEL: Record<ConfirmationRequestStatus, string> = {
-  PENDING: "Pendente",
-  SENT: "Enviado",
-  VIEWED: "Visualizado",
-  IDENTITY_PENDING: "Verificação em andamento",
-  IDENTITY_VERIFIED: "Identidade verificada",
-  IDENTITY_FAILED: "Falha na verificação",
-  CONFIRMED: "Confirmado",
-  CONTESTED: "Contestado",
-  DELIVERY_FAILED: "Falha na entrega",
-  EXPIRED: "Expirado",
-  REVOKED: "Revogado",
-};
+export function confirmationStatusLabel(t: Dict): Record<ConfirmationRequestStatus, string> {
+  return {
+    PENDING: t.deliveries.confirmationStatusPending,
+    SENT: t.deliveries.confirmationStatusSent,
+    VIEWED: t.deliveries.confirmationStatusViewed,
+    IDENTITY_PENDING: t.deliveries.confirmationStatusIdentityPending,
+    IDENTITY_VERIFIED: t.deliveries.confirmationStatusIdentityVerified,
+    IDENTITY_FAILED: t.deliveries.confirmationStatusIdentityFailed,
+    CONFIRMED: t.deliveries.confirmationStatusConfirmed,
+    CONTESTED: t.deliveries.confirmationStatusContested,
+    DELIVERY_FAILED: t.deliveries.confirmationStatusDeliveryFailed,
+    EXPIRED: t.deliveries.confirmationStatusExpired,
+    REVOKED: t.deliveries.confirmationStatusRevoked,
+  };
+}
 
 /** Statuses for which a confirmation_request is still "live" (a worker could still act on
  * it) -- used to decide whether the link panel offers "Gerar link" or "Gerar novo link". */
@@ -27,45 +32,50 @@ export const LIVE_CONFIRMATION_STATUSES = new Set<ConfirmationRequestStatus>(["S
 
 /** All 5 assurance levels; AL2-AL4 are reserved for FASE 4 and unreachable today, but must
  * render sanely if they ever show up. */
-export const ASSURANCE_LEVEL_LABEL: Record<AssuranceLevel, string> = {
-  AL0_LINK_ONLY: "Apenas link",
-  AL1_LINK_KNOWLEDGE: "Link + verificação",
-  AL2_SELFIE_LIVENESS: "Selfie com prova de vida",
-  AL3_FACE_MATCH_ENROLLED: "Reconhecimento facial",
-  AL4_GOV_VERIFIED: "Verificado (gov.br)",
-};
+export function assuranceLevelLabel(t: Dict): Record<AssuranceLevel, string> {
+  return {
+    AL0_LINK_ONLY: t.deliveries.assuranceLevelLinkOnly,
+    AL1_LINK_KNOWLEDGE: t.deliveries.assuranceLevelLinkKnowledge,
+    AL2_SELFIE_LIVENESS: t.deliveries.assuranceLevelSelfieLiveness,
+    AL3_FACE_MATCH_ENROLLED: t.deliveries.assuranceLevelFaceMatchEnrolled,
+    AL4_GOV_VERIFIED: t.deliveries.assuranceLevelGovVerified,
+  };
+}
 
-export const CONTEST_REASON_LABEL: Record<DeliveryContest["reasonCode"], string> = {
-  NOT_RECEIVED: "Não recebido",
-  WRONG_ITEM: "Item errado",
-  WRONG_QUANTITY: "Quantidade errada",
-  ALREADY_RETURNED: "Já devolvido",
-  OTHER: "Outro",
-};
+export function contestReasonLabel(t: Dict): Record<DeliveryContest["reasonCode"], string> {
+  return {
+    NOT_RECEIVED: t.deliveries.contestReasonNotReceived,
+    WRONG_ITEM: t.deliveries.contestReasonWrongItem,
+    WRONG_QUANTITY: t.deliveries.contestReasonWrongQuantity,
+    ALREADY_RETURNED: t.deliveries.contestReasonAlreadyReturned,
+    OTHER: t.deliveries.contestReasonOther,
+  };
+}
 
-export const ACTOR_KIND_LABEL: Record<AuditEvent["actorKind"], string> = {
-  USER: "Gestor",
-  WORKER: "Funcionário",
-  SYSTEM: "Sistema",
-  PROVIDER: "Provedor",
-  PLATFORM: "Plataforma",
-};
-
-const AUDIT_EVENT_LABEL: Record<string, string> = {
-  CONFIRMATION_CREATED: "Link de confirmação gerado",
-  LINK_VIEWED: "Link visualizado",
-  IDENTITY_VERIFIED: "Identidade verificada",
-  IDENTITY_FAILED: "Falha na verificação de identidade",
-  DELIVERY_CONFIRMED: "Entrega confirmada",
-  DELIVERY_CONTESTED: "Entrega contestada",
-  CONFIRMATION_EXPIRED: "Link de confirmação expirado",
-  CONFIRMATION_REVOKED: "Link de confirmação revogado",
-  CONTEST_RESPONDED: "Resposta à contestação registrada",
-  EVIDENCE_SEALED: "Comprovante selado",
-};
+export function actorKindLabel(t: Dict): Record<AuditEvent["actorKind"], string> {
+  return {
+    USER: t.deliveries.actorKindUser,
+    WORKER: t.deliveries.actorKindWorker,
+    SYSTEM: t.deliveries.actorKindSystem,
+    PROVIDER: t.deliveries.actorKindProvider,
+    PLATFORM: t.deliveries.actorKindPlatform,
+  };
+}
 
 /** Localized label for one audit event_type; falls back to the raw string for any type not
  * in the lookup above (this feed also carries whatever FASE 4 adds later). */
-export function auditEventLabel(eventType: string): string {
-  return AUDIT_EVENT_LABEL[eventType] ?? eventType;
+export function auditEventLabel(t: Dict, eventType: string): string {
+  const map: Record<string, string> = {
+    CONFIRMATION_CREATED: t.deliveries.auditEventConfirmationCreated,
+    LINK_VIEWED: t.deliveries.auditEventLinkViewed,
+    IDENTITY_VERIFIED: t.deliveries.auditEventIdentityVerified,
+    IDENTITY_FAILED: t.deliveries.auditEventIdentityFailed,
+    DELIVERY_CONFIRMED: t.deliveries.auditEventDeliveryConfirmed,
+    DELIVERY_CONTESTED: t.deliveries.auditEventDeliveryContested,
+    CONFIRMATION_EXPIRED: t.deliveries.auditEventConfirmationExpired,
+    CONFIRMATION_REVOKED: t.deliveries.auditEventConfirmationRevoked,
+    CONTEST_RESPONDED: t.deliveries.auditEventContestResponded,
+    EVIDENCE_SEALED: t.deliveries.auditEventEvidenceSealed,
+  };
+  return map[eventType] ?? eventType;
 }

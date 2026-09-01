@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { DeliveryStatus } from "@/lib/supabase/dal";
+import { useT } from "@/i18n/provider";
 import { cancelDelivery, issueDelivery, type DeliveryFormState } from "../actions";
 
 const initialState: DeliveryFormState = { error: null };
@@ -19,6 +20,8 @@ const initialState: DeliveryFormState = { error: null };
  * must render them sanely since FASE 3+ produces them against this SAME page.
  */
 export function DeliveryActions({ deliveryId, status }: { deliveryId: string; status: DeliveryStatus }) {
+  const t = useT();
+
   if (status !== "DRAFT" && status !== "ISSUED") {
     return null;
   }
@@ -26,7 +29,7 @@ export function DeliveryActions({ deliveryId, status }: { deliveryId: string; st
   return (
     <Card className="max-w-3xl">
       <CardHeader>
-        <CardTitle>Ações</CardTitle>
+        <CardTitle>{t.common.actions}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
         {status === "DRAFT" ? <IssueForm deliveryId={deliveryId} /> : null}
@@ -37,6 +40,7 @@ export function DeliveryActions({ deliveryId, status }: { deliveryId: string; st
 }
 
 function IssueForm({ deliveryId }: { deliveryId: string }) {
+  const t = useT();
   const [state, formAction, pending] = useActionState(issueDelivery, initialState);
 
   return (
@@ -44,20 +48,21 @@ function IssueForm({ deliveryId }: { deliveryId: string }) {
       <input type="hidden" name="deliveryId" value={deliveryId} />
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
       <Button type="submit" disabled={pending} className="self-start">
-        {pending ? "Emitindo…" : "Emitir"}
+        {pending ? t.deliveries.issuing : t.deliveries.issue}
       </Button>
     </form>
   );
 }
 
 function CancelForm({ deliveryId }: { deliveryId: string }) {
+  const t = useT();
   const [state, formAction, pending] = useActionState(cancelDelivery, initialState);
   const [open, setOpen] = useState(false);
 
   if (!open) {
     return (
       <Button type="button" variant="destructive" onClick={() => setOpen(true)} className="self-start">
-        Cancelar entrega
+        {t.deliveries.cancelDelivery}
       </Button>
     );
   }
@@ -66,16 +71,16 @@ function CancelForm({ deliveryId }: { deliveryId: string }) {
     <form action={formAction} className="flex flex-col gap-2">
       <input type="hidden" name="deliveryId" value={deliveryId} />
       <div className="flex flex-col gap-2">
-        <Label htmlFor="reason">Motivo do cancelamento (opcional)</Label>
+        <Label htmlFor="reason">{t.deliveries.cancelReasonLabel}</Label>
         <Input id="reason" name="reason" maxLength={500} />
       </div>
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
       <div className="flex gap-2">
         <Button type="submit" variant="destructive" disabled={pending}>
-          {pending ? "Cancelando…" : "Confirmar cancelamento"}
+          {pending ? t.deliveries.cancelling : t.deliveries.confirmCancel}
         </Button>
         <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>
-          Voltar
+          {t.common.back}
         </Button>
       </div>
     </form>

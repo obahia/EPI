@@ -1,6 +1,10 @@
+"use client";
+
 import { Badge, type badgeVariants } from "@/components/ui/badge";
 import type { VariantProps } from "class-variance-authority";
 import type { DeliveryStatus } from "@/lib/supabase/dal";
+import { useT } from "@/i18n/provider";
+import type { Dict } from "@/i18n/dictionaries";
 
 type BadgeVariant = VariantProps<typeof badgeVariants>["variant"];
 
@@ -19,7 +23,7 @@ const DELIVERY_STATUS_META: Record<DeliveryStatus, StatusMeta> = {
   CONFIRMED: {
     label: "Confirmada",
     variant: "outline",
-    className: "border-green-600/40 text-green-700 dark:text-green-400",
+    className: "border-success/30 bg-success-soft text-success",
   },
   CONTESTED: { label: "Contestada", variant: "destructive" },
   CANCELLED: { label: "Cancelada", variant: "outline" },
@@ -32,11 +36,27 @@ export function getDeliveryStatusMeta(status: DeliveryStatus): StatusMeta {
   return DELIVERY_STATUS_META[status];
 }
 
+/** Locale-aware label for one delivery status, kept separate from getDeliveryStatusMeta
+ * (whose pt-BR label stays pure/synchronous for delivery-status-badge.test.ts) so the
+ * actual translation happens here, at render time, where useT() is available. */
+function deliveryStatusLabel(t: Dict, status: DeliveryStatus): string {
+  const map: Record<DeliveryStatus, string> = {
+    DRAFT: t.deliveries.statusDraft,
+    ISSUED: t.deliveries.statusIssued,
+    CONFIRMED: t.deliveries.statusConfirmed,
+    CONTESTED: t.deliveries.statusContested,
+    CANCELLED: t.deliveries.statusCancelled,
+    SUPERSEDED: t.deliveries.statusSuperseded,
+  };
+  return map[status];
+}
+
 export function DeliveryStatusBadge({ status }: { status: DeliveryStatus }) {
+  const t = useT();
   const meta = getDeliveryStatusMeta(status);
   return (
     <Badge variant={meta.variant} className={meta.className}>
-      {meta.label}
+      {deliveryStatusLabel(t, status)}
     </Badge>
   );
 }

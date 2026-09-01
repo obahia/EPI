@@ -6,17 +6,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { isValidCaNumber } from "@/lib/epi/ca";
+import { useT } from "@/i18n/provider";
 import { createEpi, type EpiFormState } from "../actions";
 
 const initialState: EpiFormState = { error: null };
-
-const UNIT_OPTIONS = [
-  { value: "UN", label: "Unidade" },
-  { value: "PAR", label: "Par" },
-  { value: "CX", label: "Caixa" },
-  { value: "M", label: "Metro" },
-  { value: "KG", label: "Quilo" },
-];
 
 // Matches the shadcn Input's visual style -- no shadcn Select component is installed yet
 // (same rationale as employees/[id]/employee-edit-form.tsx's own selectClassName).
@@ -40,10 +33,19 @@ export function EpiCreateForm({
   companyId: string;
   canCreateOrgWide: boolean;
 }) {
+  const t = useT();
   const [state, formAction, pending] = useActionState(createEpi, initialState);
   const [caNumber, setCaNumber] = useState("");
   const [scope, setScope] = useState<"company" | "org">("company");
   const caInvalid = caNumber.length > 0 && !isValidCaNumber(caNumber);
+
+  const unitOptions = [
+    { value: "UN", label: t.epis.unitUn },
+    { value: "PAR", label: t.epis.unitPar },
+    { value: "CX", label: t.epis.unitCx },
+    { value: "M", label: t.epis.unitM },
+    { value: "KG", label: t.epis.unitKg },
+  ];
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
@@ -52,7 +54,7 @@ export function EpiCreateForm({
 
       {canCreateOrgWide ? (
         <div className="flex flex-col gap-2">
-          <Label>Catálogo</Label>
+          <Label>{t.epis.catalogLabel}</Label>
           <div className="flex flex-col gap-1 text-sm">
             <label className="flex items-center gap-2">
               <input
@@ -62,7 +64,7 @@ export function EpiCreateForm({
                 checked={scope === "company"}
                 onChange={() => setScope("company")}
               />
-              Apenas desta empresa
+              {t.epis.scopeCompanyOnly}
             </label>
             <label className="flex items-center gap-2">
               <input
@@ -72,7 +74,7 @@ export function EpiCreateForm({
                 checked={scope === "org"}
                 onChange={() => setScope("org")}
               />
-              Compartilhado com toda a organização
+              {t.epis.scopeOrgWide}
             </label>
           </div>
         </div>
@@ -81,12 +83,12 @@ export function EpiCreateForm({
       )}
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="name">Nome</Label>
+        <Label htmlFor="name">{t.common.name}</Label>
         <Input id="name" name="name" required />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="caNumber">CA</Label>
+        <Label htmlFor="caNumber">{t.epis.caLabel}</Label>
         <Input
           id="caNumber"
           name="caNumber"
@@ -97,28 +99,28 @@ export function EpiCreateForm({
           value={caNumber}
           onChange={(e) => setCaNumber(e.target.value)}
         />
-        {caInvalid ? <p className="text-sm text-destructive">CA inválido (3 a 8 dígitos, apenas números).</p> : null}
+        {caInvalid ? <p className="text-sm text-destructive">{t.epis.caInvalidMessage}</p> : null}
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="manufacturer">Fabricante</Label>
+        <Label htmlFor="manufacturer">{t.epis.manufacturerLabel}</Label>
         <Input id="manufacturer" name="manufacturer" />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="model">Modelo</Label>
+        <Label htmlFor="model">{t.epis.modelLabel}</Label>
         <Input id="model" name="model" />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="description">Descrição</Label>
+        <Label htmlFor="description">{t.epis.descriptionLabel}</Label>
         <Input id="description" name="description" />
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor="defaultUnit">Unidade padrão</Label>
+        <Label htmlFor="defaultUnit">{t.epis.defaultUnitLabel}</Label>
         <select id="defaultUnit" name="defaultUnit" defaultValue="UN" className={selectClassName}>
-          {UNIT_OPTIONS.map((opt) => (
+          {unitOptions.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>
@@ -129,7 +131,7 @@ export function EpiCreateForm({
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
 
       <Button type="submit" disabled={pending || caInvalid}>
-        {pending ? "Salvando…" : "Cadastrar EPI"}
+        {pending ? t.epis.saving : t.epis.registerEpi}
       </Button>
     </form>
   );

@@ -1,32 +1,23 @@
-import Link from "next/link";
+import { getLocale } from "@/i18n/get-locale";
+import { getDictionary } from "@/i18n/dictionaries";
+import { I18nProvider } from "@/i18n/provider";
+import { DashboardSidebar } from "@/components/dashboard-sidebar";
 
 /**
- * Thin nav shared by every authenticated route. Deliberately not doing the auth check
- * here -- each page under (dashboard) already calls verifySession()/redirect("/login")
- * itself (see docs/architecture.md §4: authorization lives close to the data, never in a
- * layout or middleware). This is presentation only.
+ * Deliberately not doing the auth check here -- each page under (dashboard) already calls
+ * verifySession()/redirect("/login") itself (see docs/architecture.md §4: authorization
+ * lives close to the data, never in a layout or middleware). This is presentation only.
  */
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const locale = await getLocale();
+  const dict = getDictionary(locale);
+
   return (
-    <div className="flex flex-1 flex-col">
-      <nav className="flex items-center gap-4 border-b px-8 py-3 text-sm">
-        <Link href="/dashboard" className="font-medium">
-          EPI
-        </Link>
-        <Link href="/companies" className="text-muted-foreground hover:text-foreground">
-          Empresas
-        </Link>
-        <Link href="/employees" className="text-muted-foreground hover:text-foreground">
-          Funcionários
-        </Link>
-        <Link href="/epis" className="text-muted-foreground hover:text-foreground">
-          EPIs
-        </Link>
-        <Link href="/deliveries" className="text-muted-foreground hover:text-foreground">
-          Entregas
-        </Link>
-      </nav>
-      {children}
-    </div>
+    <I18nProvider locale={locale} dict={dict}>
+      <div className="flex flex-1 flex-col md:flex-row">
+        <DashboardSidebar />
+        <div className="flex flex-1 flex-col overflow-x-hidden">{children}</div>
+      </div>
+    </I18nProvider>
   );
 }

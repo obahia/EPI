@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useT } from "@/i18n/provider";
 import { createConfirmationLink, type ConfirmationLinkState } from "../actions";
 
 const initialState: ConfirmationLinkState = { error: null, path: null, expiresAt: null };
@@ -15,6 +16,7 @@ const initialState: ConfirmationLinkState = { error: null, path: null, expiresAt
  * window.location.origin, and never constructed or logged server-side.
  */
 export function ConfirmationLinkPanel({ deliveryId, hasLiveLink }: { deliveryId: string; hasLiveLink: boolean }) {
+  const t = useT();
   const [state, formAction, pending] = useActionState(createConfirmationLink, initialState);
   // Lazy initializer runs synchronously during render (both the server's no-op pass, where
   // window is undefined, and the client's hydration pass, where it isn't) -- no effect needed.
@@ -36,14 +38,14 @@ export function ConfirmationLinkPanel({ deliveryId, hasLiveLink }: { deliveryId:
   return (
     <Card className="max-w-3xl">
       <CardHeader>
-        <CardTitle>Link de confirmação</CardTitle>
+        <CardTitle>{t.deliveries.confirmationLinkTitle}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <form action={formAction} className="flex flex-col gap-2">
           <input type="hidden" name="deliveryId" value={deliveryId} />
           {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
           <Button type="submit" disabled={pending} className="self-start">
-            {pending ? "Gerando…" : showRegenerateLabel ? "Gerar novo link" : "Gerar link de confirmação"}
+            {pending ? t.deliveries.generatingLink : showRegenerateLabel ? t.deliveries.regenerateLink : t.deliveries.generateLink}
           </Button>
         </form>
 
@@ -52,12 +54,12 @@ export function ConfirmationLinkPanel({ deliveryId, hasLiveLink }: { deliveryId:
             <div className="flex gap-2">
               <Input readOnly value={url} onFocus={(e) => e.currentTarget.select()} className="font-mono text-xs" />
               <Button type="button" variant="outline" onClick={handleCopy}>
-                {copied ? "Copiado" : "Copiar"}
+                {copied ? t.common.copied : t.common.copy}
               </Button>
             </div>
             {state.expiresAt ? (
               <p className="text-xs text-muted-foreground">
-                Expira em {new Date(state.expiresAt).toLocaleString("pt-BR")}
+                {t.deliveries.expiresAtPrefix} {new Date(state.expiresAt).toLocaleString("pt-BR")}
               </p>
             ) : null}
           </div>
