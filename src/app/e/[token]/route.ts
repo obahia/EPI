@@ -39,10 +39,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     60,
     Math.floor((new Date(row.expires_at).getTime() - Date.now()) / 1000),
   );
+  // `lax`, NOT `strict`. The worker always arrives here from somewhere else -- a WhatsApp
+  // message, an SMS, a QR scan -- which is a cross-site navigation. A `strict` cookie is
+  // withheld on the request that follows this redirect, so the very first load of
+  // /e/s/<id> saw no cookie and rendered "Link não disponível"; only a manual refresh
+  // (a same-site navigation) worked. `lax` still withholds the cookie on cross-site POSTs,
+  // which is the CSRF protection that actually matters here: confirming and contesting are
+  // Server Actions (POST), and they are additionally guarded by the one-time nonce, the
+  // expiry, the rate limit, and the [id]-vs-token match check in page.tsx.
   response.cookies.set("epi_wt", token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    sameSite: "lax",
     path: "/e",
     maxAge: maxAgeSeconds,
   });

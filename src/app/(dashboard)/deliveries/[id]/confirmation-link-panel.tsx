@@ -42,7 +42,12 @@ export function ConfirmationLinkPanel({ deliveryId, hasLiveLink }: { deliveryId:
   useEffect(() => {
     if (!url) return;
     let cancelled = false;
-    QRCode.toDataURL(url, { margin: 1, width: 240 })
+    // The URL carries a 43-character token, so the symbol is dense. Render it large and
+    // with a full 4-module quiet zone: at the 80px this used to be drawn at, each module
+    // fell below one device pixel and phone cameras could not resolve it. Error correction
+    // stays at "L" deliberately -- a higher level adds modules, which on a URL this long
+    // makes every module smaller and the code *harder* to scan, not easier.
+    QRCode.toDataURL(url, { margin: 4, width: 640, errorCorrectionLevel: "L" })
       .then((dataUrl) => {
         if (!cancelled) setQrFor({ url, dataUrl });
       })
@@ -86,12 +91,16 @@ export function ConfirmationLinkPanel({ deliveryId, hasLiveLink }: { deliveryId:
             </Button>
           </div>
 
-          <div className="flex items-start gap-3.5">
+          <div className="flex flex-col items-center gap-3">
             {qrFor?.url === url ? (
               // eslint-disable-next-line @next/next/no-img-element -- a client-generated data: URI, nothing for the image optimizer to fetch
-              <img src={qrFor.dataUrl} alt={t.deliveries.qrAlt} className="size-20 shrink-0 rounded-lg" />
+              <img
+                src={qrFor.dataUrl}
+                alt={t.deliveries.qrAlt}
+                className="w-full max-w-64 rounded-xl bg-white"
+              />
             ) : null}
-            <p className="text-[12px] leading-relaxed text-muted-foreground">
+            <p className="text-center text-[12px] leading-relaxed text-muted-foreground">
               {t.deliveries.qrHint}
               {state.expiresAt ? (
                 <>
