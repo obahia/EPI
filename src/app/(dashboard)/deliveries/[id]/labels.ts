@@ -76,6 +76,11 @@ export function auditEventLabel(t: Dict, eventType: string): string {
     CONFIRMATION_REVOKED: t.deliveries.auditEventConfirmationRevoked,
     CONTEST_RESPONDED: t.deliveries.auditEventContestResponded,
     EVIDENCE_SEALED: t.deliveries.auditEventEvidenceSealed,
+    BATCH_CREATED: t.deliveries.auditEventBatchCreated,
+    DELIVERY_CREATED: t.deliveries.auditEventDeliveryCreated,
+    DELIVERY_ISSUED: t.deliveries.auditEventDeliveryIssued,
+    DELIVERY_CANCELLED: t.deliveries.auditEventDeliveryCancelled,
+    EMPLOYEES_IMPORTED: t.deliveries.auditEventEmployeesImported,
   };
   return map[eventType] ?? eventType;
 }

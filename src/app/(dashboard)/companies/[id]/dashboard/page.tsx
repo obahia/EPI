@@ -1,11 +1,24 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { AlertCircle, Activity } from "lucide-react";
-import { verifySession, getCompany, getDashboardSummary, getCompanyAuditEvents } from "@/lib/supabase/dal";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AuditTimeline } from "@/app/(dashboard)/deliveries/[id]/audit-timeline";
+import {
+  verifySession,
+  getCompany,
+  getDashboardSummary,
+  getCompanyAuditEvents,
+  getDeliveries,
+  getCompanyDeliveryItems,
+  summarizeDeliveryItems,
+} from "@/lib/supabase/dal";
+import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/page-header";
+import { Panel } from "@/components/panel";
+import { PendingBanner } from "@/components/pending-banner";
+import { RecentActivity } from "@/components/recent-activity";
+import { NeedsAttention } from "@/components/needs-attention";
 import { StatItem } from "@/components/stat-item";
 import { EmptyState } from "@/components/empty-state";
+import { formatCnpj } from "@/lib/br/cnpj";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary } from "@/i18n/dictionaries";
 
@@ -14,6 +27,10 @@ import { getDictionary } from "@/i18n/dictionaries";
  * "is anything stuck" -- deliberately not a chart. getDashboardSummary already bounds the
  * period counts at 30 days server-side; the two "pending over N days" counts are never
  * period-bound (see that function's own comment in dal.ts).
+ *
+ * Laid out from the mockup (screen 4b): the waiting count takes a terracotta tile the
+ * height of the whole counter grid, the other four counters sit beside it as plain tiles,
+ * and the bottom pairs the activity feed with the people who have been waiting longest.
  */
 export default async function CompanyDashboardPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await verifySession();
@@ -23,69 +40,85 @@ export default async function CompanyDashboardPage({ params }: { params: Promise
 
   const t = getDictionary(await getLocale());
   const { id } = await params;
-  const [company, summary, auditEvents] = await Promise.all([
+  const [company, summary, auditEvents, deliveries, items] = await Promise.all([
     getCompany(id),
     getDashboardSummary(id),
-    getCompanyAuditEvents(id, 50),
+    getCompanyAuditEvents(id, 8),
+    getDeliveries(id),
+    getCompanyDeliveryItems(id),
   ]);
   if (!company) {
     notFound();
   }
 
+  const itemsByDelivery = summarizeDeliveryItems(items);
+
+  // Longest-waiting first: the right-hand column names these three instead of counting them.
+  const oldestWaiting = deliveries
+    .filter((d) => d.status === "ISSUED" && d.issuedAt)
+    .sort((a, b) => new Date(a.issuedAt!).getTime() - new Date(b.issuedAt!).getTime())
+    .slice(0, 3);
+
+  const pendingHref = `/deliveries?company=${company.id}&status=ISSUED`;
+
   return (
-    <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
-      <div>
-        <h1 className="font-heading text-2xl font-medium tracking-tight">{t.companies.operationalDashboard}</h1>
-        <p className="text-sm text-muted-foreground">{company.legalName}</p>
-        <Link
-          href={`/companies/${company.id}`}
-          className="text-sm text-muted-foreground underline-offset-4 hover:underline"
-        >
-          {t.companies.backToCompany}
-        </Link>
-      </div>
+    <main className="flex flex-1 flex-col gap-5 p-4 md:p-7.5">
+      <PageHeader
+        kicker={t.companies.last30DaysStats}
+        title={t.companies.operationalDashboard}
+        subtitle={`${company.legalName} · ${t.companies.cnpjLabel} ${formatCnpj(company.cnpj)}`}
+        actions={
+          <>
+            <Button asChild variant="outline" size="lg">
+              <Link href={`/deliveries/batch/new?company=${company.id}`}>{t.deliveries.newBatch}</Link>
+            </Button>
+            <Button asChild size="lg">
+              <Link href={`/deliveries/new?company=${company.id}`}>{t.deliveries.newDelivery}</Link>
+            </Button>
+          </>
+        }
+      />
 
       {summary ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>{t.companies.last30DaysStats}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <StatItem label={t.companies.activeEmployees} value={summary.activeEmployeesCount} />
-              <StatItem label={t.companies.deliveriesInPeriod} value={summary.deliveriesInPeriod} />
-              <StatItem label={t.companies.confirmedLabel} value={summary.confirmedCount} />
-              <StatItem label={t.companies.pendingLabel} value={summary.pendingCount} />
-              <StatItem label={t.companies.contestedLabel} value={summary.contestedCount} />
-              <StatItem label={t.companies.cancelledLabel} value={summary.cancelledCount} />
-              <StatItem label={t.companies.pendingOver3Days} value={summary.pendingOver3DaysCount} />
-              <StatItem label={t.companies.pendingOver7Days} value={summary.pendingOver7DaysCount} />
-            </dl>
-          </CardContent>
-        </Card>
+        <dl className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
+          <PendingBanner
+            pendingCount={summary.pendingCount}
+            over3Days={summary.pendingOver3DaysCount}
+            over7Days={summary.pendingOver7DaysCount}
+            deliveriesHref={pendingHref}
+            t={t}
+            className="sm:col-span-2 xl:col-span-1 xl:row-span-2"
+          />
+          <StatItem label={t.companies.activeEmployees} value={summary.activeEmployeesCount} />
+          <StatItem label={t.companies.deliveriesInPeriod} value={summary.deliveriesInPeriod} />
+          <StatItem label={t.companies.confirmedLabel} value={summary.confirmedCount} tone="success" />
+          <StatItem
+            label={t.companies.contestedLabel}
+            value={summary.contestedCount}
+            hint={`${summary.cancelledCount} ${t.companies.cancelledLabel.toLowerCase()}`}
+          />
+        </dl>
       ) : (
-        <Card>
-          <CardContent>
-            <EmptyState icon={AlertCircle} message={t.companies.dashboardLoadError} />
-          </CardContent>
-        </Card>
+        <Panel>
+          <EmptyState icon={AlertCircle} message={t.companies.dashboardLoadError} />
+        </Panel>
       )}
 
-      {auditEvents.length === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>{t.companies.recentActivity}</CardTitle>
-          </CardHeader>
-          <CardContent>
+      <div className="grid grid-cols-1 gap-3.5 xl:grid-cols-[1.75fr_1fr]">
+        {auditEvents.length === 0 ? (
+          <Panel>
             <EmptyState icon={Activity} message={t.companies.noActivityYet} />
-          </CardContent>
-        </Card>
-      ) : (
-        // AuditTimeline already supplies its own Card + title ("Histórico") -- reused as-is
-        // (docs task note: this feed's events have no deliveryId to link to individually,
-        // and the component never links per-row anyway, so it's a direct reuse).
-        <AuditTimeline events={auditEvents} />
-      )}
+          </Panel>
+        ) : (
+          <RecentActivity events={auditEvents} historyHref={`/deliveries?company=${company.id}`} t={t} />
+        )}
+        <NeedsAttention
+          deliveries={oldestWaiting}
+          itemsByDelivery={itemsByDelivery}
+          deliveriesHref={pendingHref}
+          t={t}
+        />
+      </div>
     </main>
   );
 }

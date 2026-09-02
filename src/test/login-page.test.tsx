@@ -17,9 +17,13 @@ describe("LoginPage", () => {
         <LoginPage />
       </I18nProvider>,
     );
-    expect(screen.getByRole("heading", { name: "Entrar" })).toBeDefined();
+    // The mockup's login (screen 4a) leads with the product headline, not with the word
+    // "Entrar" -- that is the submit button, asserted below.
+    expect(screen.getByRole("heading", { name: "Prova de entrega de EPI, selada." })).toBeDefined();
     expect(screen.getByLabelText("E-mail")).toBeDefined();
     expect(screen.getByLabelText("Senha")).toBeDefined();
     expect(screen.getByRole("button", { name: "Entrar" })).toBeDefined();
+    expect(screen.getByLabelText("Lembrar de mim")).toBeDefined();
+    expect(screen.getByRole("link", { name: "Esqueceu a senha?" })).toBeDefined();
   });
 });

@@ -1,9 +1,9 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
+import QRCode from "qrcode";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Panel, PanelKicker } from "@/components/panel";
 import { useT } from "@/i18n/provider";
 import { createConfirmationLink, type ConfirmationLinkState } from "../actions";
 
@@ -13,7 +13,12 @@ const initialState: ConfirmationLinkState = { error: null, path: null, expiresAt
  * Generates (or regenerates) the worker confirmation link for an ISSUED/CONTESTED delivery.
  * The Server Action only ever returns a relative `path` (see actions.ts's comment on
  * createConfirmationLink) -- the absolute URL is built HERE, client-side, from
- * window.location.origin, and never constructed or logged server-side.
+ * window.location.origin, and never constructed or logged server-side. The QR is rendered
+ * in the browser from that same URL for the same reason.
+ *
+ * Laid out from the mockup (screen 4d): the live link is the panel, on the peach field --
+ * the URL itself, the two ways of getting it to the worker, and the QR to hold up to
+ * their phone when they are standing right there.
  */
 export function ConfirmationLinkPanel({ deliveryId, hasLiveLink }: { deliveryId: string; hasLiveLink: boolean }) {
   const t = useT();
@@ -24,10 +29,31 @@ export function ConfirmationLinkPanel({ deliveryId, hasLiveLink }: { deliveryId:
   // Tracks *which* url was last copied (rather than a plain boolean) so a fresh link from a
   // regenerate naturally resets the button label without an effect.
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  // Keyed by the url it was rendered for, so a stale QR is never shown beside a fresh
+  // link -- and so the effect below only ever writes state from its async callback.
+  const [qrFor, setQrFor] = useState<{ url: string; dataUrl: string } | null>(null);
 
   const url = state.path && origin ? `${origin}${state.path}` : null;
   const showRegenerateLabel = hasLiveLink || state.path !== null;
   const copied = copiedUrl !== null && copiedUrl === url;
+
+  // toDataURL is async and the link only exists after the action resolves, so this is the
+  // one thing here that genuinely needs an effect.
+  useEffect(() => {
+    if (!url) return;
+    let cancelled = false;
+    QRCode.toDataURL(url, { margin: 1, width: 240 })
+      .then((dataUrl) => {
+        if (!cancelled) setQrFor({ url, dataUrl });
+      })
+      .catch(() => {
+        // A QR is a convenience beside the link, never the only way to hand it over --
+        // if it cannot be drawn the panel simply shows the URL and the buttons.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
 
   async function handleCopy() {
     if (!url) return;
@@ -36,35 +62,61 @@ export function ConfirmationLinkPanel({ deliveryId, hasLiveLink }: { deliveryId:
   }
 
   return (
-    <Card className="max-w-3xl">
-      <CardHeader>
-        <CardTitle>{t.deliveries.confirmationLinkTitle}</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <form action={formAction} className="flex flex-col gap-2">
-          <input type="hidden" name="deliveryId" value={deliveryId} />
-          {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
-          <Button type="submit" disabled={pending} className="self-start">
-            {pending ? t.deliveries.generatingLink : showRegenerateLabel ? t.deliveries.regenerateLink : t.deliveries.generateLink}
-          </Button>
-        </form>
+    <Panel tone="warning" className="flex flex-col gap-4">
+      <PanelKicker className="text-warning">
+        {t.deliveries.confirmationLinkTitle}
+        {url ? ` · ${t.deliveries.linkActive}` : null}
+      </PanelKicker>
 
-        {url ? (
-          <div className="flex flex-col gap-2">
-            <div className="flex gap-2">
-              <Input readOnly value={url} onFocus={(e) => e.currentTarget.select()} className="font-mono text-xs" />
-              <Button type="button" variant="outline" onClick={handleCopy}>
-                {copied ? t.common.copied : t.common.copy}
-              </Button>
-            </div>
-            {state.expiresAt ? (
-              <p className="text-xs text-muted-foreground">
-                {t.deliveries.expiresAtPrefix} {new Date(state.expiresAt).toLocaleString("pt-BR")}
-              </p>
-            ) : null}
+      {url ? (
+        <>
+          <p className="font-mono text-[12px] break-all">{url}</p>
+          <div className="flex flex-wrap gap-2.5">
+            <Button type="button" onClick={handleCopy}>
+              {copied ? t.common.copied : t.deliveries.copyLink}
+            </Button>
+            <Button asChild variant="outline">
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(url)}`}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                WhatsApp
+              </a>
+            </Button>
           </div>
-        ) : null}
-      </CardContent>
-    </Card>
+
+          <div className="flex items-start gap-3.5">
+            {qrFor?.url === url ? (
+              // eslint-disable-next-line @next/next/no-img-element -- a client-generated data: URI, nothing for the image optimizer to fetch
+              <img src={qrFor.dataUrl} alt={t.deliveries.qrAlt} className="size-20 shrink-0 rounded-lg" />
+            ) : null}
+            <p className="text-[12px] leading-relaxed text-muted-foreground">
+              {t.deliveries.qrHint}
+              {state.expiresAt ? (
+                <>
+                  {" "}
+                  {t.deliveries.expiresAtPrefix} {new Date(state.expiresAt).toLocaleString("pt-BR")}.
+                </>
+              ) : null}
+            </p>
+          </div>
+        </>
+      ) : (
+        <p className="text-[12.5px] text-muted-foreground">{t.deliveries.linkPanelHint}</p>
+      )}
+
+      <form action={formAction} className="flex flex-col gap-2">
+        <input type="hidden" name="deliveryId" value={deliveryId} />
+        {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
+        <Button type="submit" variant={url ? "outline" : "default"} disabled={pending} className="self-start">
+          {pending
+            ? t.deliveries.generatingLink
+            : showRegenerateLabel
+              ? t.deliveries.regenerateLink
+              : t.deliveries.generateLink}
+        </Button>
+      </form>
+    </Panel>
   );
 }

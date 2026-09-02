@@ -3,11 +3,10 @@ import { getDictionary } from "@/i18n/dictionaries";
 import { I18nProvider } from "@/i18n/provider";
 
 /**
- * Dark, chrome-free treatment for the whole auth flow (login/forgot/reset) --
- * scoped to just this route group via the `dark` class (see the .dark block in
- * globals.css), never applied to the authenticated panel. No header: nothing in
- * the top corners, by explicit request -- the centered SealMark is each page's
- * only brand mark.
+ * Chrome-free treatment for the whole auth flow (login/forgot/reset) -- no
+ * header, nothing in the top corners. Login (implemented from the Selo
+ * Desktop design) fills this edge-to-edge as a split screen; forgot/reset add
+ * their own centering and padding since they stay a centered card.
  */
 export default async function AuthLayout({ children }: { children: React.ReactNode }) {
   const locale = await getLocale();
@@ -15,9 +14,7 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
 
   return (
     <I18nProvider locale={locale} dict={dict}>
-      <div className="dark flex flex-1 flex-col bg-background">
-        <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">{children}</main>
-      </div>
+      <div className="flex flex-1 flex-col bg-background">{children}</div>
     </I18nProvider>
   );
 }

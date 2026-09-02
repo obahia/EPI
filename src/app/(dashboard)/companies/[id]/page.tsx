@@ -24,7 +24,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
   return (
     <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
       <div className="flex items-center justify-between">
-        <h1 className="font-heading text-2xl font-medium tracking-tight">{company.legalName}</h1>
+        <h1 className="font-heading text-4xl font-extrabold tracking-tight">{company.legalName}</h1>
         <div className="flex gap-2">
           <Button asChild variant="outline">
             <Link href={`/employees?company=${company.id}`}>{t.companies.viewEmployees}</Link>

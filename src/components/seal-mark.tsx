@@ -1,43 +1,38 @@
 import { cn } from "@/lib/utils";
 
 /**
- * Selo's signature mark: a rosette stamp, the shape a Brazilian carimbo leaves on a
- * document. `broken` renders it fractured along one radius, used only on the 404 page.
+ * Selo's signature mark, implemented from the Selo Desktop design: a sunburst
+ * disc (`repeating-conic-gradient`, 16 five-degree spokes) around a cream
+ * inner circle with the "S" initial. `broken` (404 page only) dims the
+ * sunburst and cracks the ring.
  */
 export function SealMark({ className, broken = false }: { className?: string; broken?: boolean }) {
-  const notches = Array.from({ length: 16 }, (_, i) => (i * 360) / 16);
   return (
-    <svg viewBox="0 0 120 120" className={cn("text-primary", className)} fill="none" aria-hidden="true">
-      <g stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-        {notches.map((deg) => (
-          <line
-            key={deg}
-            x1="60"
-            y1="6"
-            x2="60"
-            y2="16"
-            transform={`rotate(${deg} 60 60)`}
-            opacity={broken && deg > 150 && deg < 210 ? 0.15 : 1}
-          />
-        ))}
-      </g>
-      <circle cx="60" cy="60" r="42" stroke="currentColor" strokeWidth="2.5" opacity={broken ? 0.5 : 1} />
-      {broken ? (
-        <path d="M60 18 L52 60 L64 78 L48 102" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-      ) : (
-        <circle cx="60" cy="60" r="30" stroke="currentColor" strokeWidth="2.5" />
-      )}
-      <text
-        x="60"
-        y="66"
-        textAnchor="middle"
-        fontFamily="var(--font-heading)"
-        fontSize="22"
-        fill="currentColor"
-        opacity={broken ? 0.4 : 1}
+    <div className={cn("relative shrink-0", className)} style={{ containerType: "inline-size" }}>
+      <div
+        className="absolute inset-0 rounded-full"
+        style={{
+          background: "repeating-conic-gradient(from 0deg, var(--primary) 0deg 5deg, transparent 5deg 22.5deg)",
+          opacity: broken ? 0.45 : 1,
+        }}
+        aria-hidden="true"
+      />
+      <div
+        className="absolute rounded-full border-2 border-primary bg-background flex items-center justify-center"
+        style={{ inset: "16%" }}
       >
-        S
-      </text>
-    </svg>
+        <span
+          className="font-heading font-extrabold text-primary leading-none"
+          style={{ fontSize: "32cqw", opacity: broken ? 0.5 : 1 }}
+        >
+          S
+        </span>
+      </div>
+      {broken ? (
+        <svg viewBox="0 0 100 100" className="absolute inset-0 text-primary" fill="none" aria-hidden="true">
+          <path d="M50 3 L41 48 L59 64 L45 97" stroke="currentColor" strokeWidth="5" strokeLinecap="round" />
+        </svg>
+      ) : null}
+    </div>
   );
 }

@@ -14,20 +14,21 @@ type StatusMeta = { label: string; variant: BadgeVariant; className?: string };
 // delivery-status-badge.test.ts). All 6 app.delivery_status values are mapped even though
 // FASE 2 only ever produces DRAFT/ISSUED/CANCELLED -- CONFIRMED/CONTESTED/SUPERSEDED are
 // reachable from the SAME detail page once FASE 3+ ships, so this must never throw on
-// them. shadcn's Badge (src/components/ui/badge.tsx) only ships default/secondary/
-// destructive/outline/ghost/link -- there is no "success" variant, so CONFIRMED borrows a
-// green className on top of "outline" instead of inventing a new variant name.
+// them. Colours are the mockup's status column: the two states that mean somebody still
+// has to act are filled pills (terracotta for issued, rose for contested), confirmed is a
+// soft olive pill, and the three settled-or-not-started states are plain muted text
+// rather than a pill -- the mockup does not chip them.
 const DELIVERY_STATUS_META: Record<DeliveryStatus, StatusMeta> = {
-  DRAFT: { label: "Rascunho", variant: "outline" },
+  DRAFT: { label: "Rascunho", variant: "ghost", className: "text-muted-foreground" },
   ISSUED: { label: "Emitida", variant: "default" },
   CONFIRMED: {
     label: "Confirmada",
     variant: "outline",
-    className: "border-success/30 bg-success-soft text-success",
+    className: "border-transparent bg-success-soft text-success",
   },
-  CONTESTED: { label: "Contestada", variant: "destructive" },
-  CANCELLED: { label: "Cancelada", variant: "outline" },
-  SUPERSEDED: { label: "Substituída", variant: "outline" },
+  CONTESTED: { label: "Contestada", variant: "destructive", className: "bg-destructive-soft" },
+  CANCELLED: { label: "Cancelada", variant: "ghost", className: "text-muted-foreground" },
+  SUPERSEDED: { label: "Substituída", variant: "ghost", className: "text-muted-foreground" },
 };
 
 /** label + Badge variant for one delivery status. Exported for testing; use

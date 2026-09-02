@@ -397,6 +397,8 @@ export type Delivery = {
   createdAt: string;
   updatedAt: string;
   employeeFullName: string;
+  /** The batch this delivery was issued in, or null when it was created one-off. */
+  batchId: string | null;
 };
 
 type DeliveryRow = {
@@ -421,10 +423,11 @@ type DeliveryRow = {
   created_at: string;
   updated_at: string;
   employee_full_name: string;
+  batch_id: string | null;
 };
 
 const DELIVERY_COLUMNS =
-  "id, organization_id, company_id, employee_id, chain_id, chain_version, corrects_delivery_id, superseded_by_delivery_id, status, delivery_date, note, issued_at, frozen_at, confirmed_at, contested_at, cancelled_at, cancel_reason, created_by, created_at, updated_at, employee_full_name";
+  "id, organization_id, company_id, employee_id, chain_id, chain_version, corrects_delivery_id, superseded_by_delivery_id, status, delivery_date, note, issued_at, frozen_at, confirmed_at, contested_at, cancelled_at, cancel_reason, created_by, created_at, updated_at, employee_full_name, batch_id";
 
 function mapDeliveryRow(row: DeliveryRow): Delivery {
   return {
@@ -449,6 +452,7 @@ function mapDeliveryRow(row: DeliveryRow): Delivery {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     employeeFullName: row.employee_full_name,
+    batchId: row.batch_id,
   };
 }
 
@@ -558,6 +562,53 @@ export const getDeliveryItems = cache(async (deliveryId: string): Promise<Delive
 
   return (data as DeliveryItemRow[]).map(mapDeliveryItemRow);
 });
+
+/**
+ * Every line item of every delivery in one company, in a single round trip.
+ * The deliveries list shows an items column per row and the dashboard names the
+ * EPI somebody is still waiting on, and both would otherwise be one getDeliveryItems()
+ * query per delivery. Callers index this by deliveryId themselves.
+ */
+export const getCompanyDeliveryItems = cache(async (companyId: string): Promise<DeliveryItem[]> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .from("epi_delivery_items")
+    .select(DELIVERY_ITEM_COLUMNS)
+    .eq("company_id", companyId)
+    .order("line_no", { ascending: true });
+
+  if (error || !data) return [];
+
+  return (data as DeliveryItemRow[]).map(mapDeliveryItemRow);
+});
+
+export type DeliveryItemSummary = {
+  /** How many distinct EPI lines the delivery has. */
+  lines: number;
+  /** Total units across those lines. */
+  units: number;
+  /** First line's EPI name -- what the dashboard names when it says who is waiting. */
+  firstEpiName: string;
+};
+
+/** Indexes getCompanyDeliveryItems() output by delivery. */
+export function summarizeDeliveryItems(items: DeliveryItem[]): Map<string, DeliveryItemSummary> {
+  const byDelivery = new Map<string, DeliveryItemSummary>();
+  for (const item of items) {
+    const entry = byDelivery.get(item.deliveryId);
+    if (entry) {
+      entry.lines += 1;
+      entry.units += item.quantity;
+    } else {
+      byDelivery.set(item.deliveryId, { lines: 1, units: item.quantity, firstEpiName: item.epiName });
+    }
+  }
+  return byDelivery;
+}
 
 export type AssuranceLevel =
   | "AL0_LINK_ONLY"

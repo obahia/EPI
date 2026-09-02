@@ -29,7 +29,7 @@ export default async function DeliveryBatchPage({ params }: { params: Promise<{ 
   return (
     <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
       <div>
-        <h1 className="font-heading text-2xl font-medium tracking-tight">
+        <h1 className="font-heading text-4xl font-extrabold tracking-tight">
           {t.deliveries.batchOfPrefix} {new Date(`${batch.deliveryDate}T00:00:00`).toLocaleDateString("pt-BR")}
         </h1>
         <Link

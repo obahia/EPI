@@ -1,9 +1,21 @@
 import { notFound, redirect } from "next/navigation";
-import { verifySession, getEmployee } from "@/lib/supabase/dal";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { verifySession, getEmployee, getDeliveries, type EmployeeStatus } from "@/lib/supabase/dal";
+import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/page-header";
+import { Panel, PanelKicker, PanelTitle } from "@/components/panel";
+import { formatPhoneBr } from "@/lib/br/phone";
 import { getLocale } from "@/i18n/get-locale";
-import { getDictionary } from "@/i18n/dictionaries";
+import { getDictionary, type Dict } from "@/i18n/dictionaries";
 import { EmployeeEditForm } from "./employee-edit-form";
+
+function statusLabel(t: Dict, status: EmployeeStatus): string {
+  const map: Record<EmployeeStatus, string> = {
+    ACTIVE: t.employees.statusActive,
+    ON_LEAVE: t.employees.statusOnLeave,
+    TERMINATED: t.employees.statusTerminated,
+  };
+  return map[status];
+}
 
 export default async function EmployeePage({ params }: { params: Promise<{ id: string }> }) {
   const session = await verifySession();
@@ -18,21 +30,88 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
     notFound();
   }
 
-  return (
-    <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
-      <div>
-        <h1 className="font-heading text-2xl font-medium tracking-tight">{employee.fullName}</h1>
-        <p className="font-mono text-sm text-muted-foreground">{employee.cpfMasked}</p>
-      </div>
+  const deliveries = await getDeliveries(employee.companyId);
+  const mine = deliveries.filter((d) => d.employeeId === employee.id);
+  const awaiting = mine.filter((d) => d.status === "ISSUED").length;
 
-      <Card className="max-w-lg">
-        <CardHeader>
-          <CardTitle>{t.employees.editEmployee}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <EmployeeEditForm employee={employee} />
-        </CardContent>
-      </Card>
+  return (
+    <main className="flex flex-1 flex-col gap-5 p-4 md:p-7.5">
+      <PageHeader
+        back={{ href: `/employees?company=${employee.companyId}`, label: t.employees.backToEmployees }}
+        title={employee.fullName}
+        titleSuffix={
+          employee.status === "ACTIVE" ? (
+            <Badge variant="outline" className="border-transparent bg-success-soft text-success">
+              {t.employees.statusActive}
+            </Badge>
+          ) : (
+            <Badge variant="ghost" className="bg-secondary text-muted-foreground">
+              {statusLabel(t, employee.status)}
+            </Badge>
+          )
+        }
+        subtitle={`${t.employees.cpfLabel} ${employee.cpfMasked}${
+          employee.registrationNumber ? ` · ${t.employees.registrationNumberLabel} ${employee.registrationNumber}` : ""
+        }`}
+      />
+
+      {/* Two columns from `xl` up, the same way the delivery detail is laid out: what you
+          can change reads down the left, what is merely true about this person sits on the
+          right. */}
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
+        <Panel className="min-w-0 flex-1">
+          <PanelTitle>{t.employees.editEmployee}</PanelTitle>
+          <div className="mt-4.5">
+            <EmployeeEditForm employee={employee} />
+          </div>
+        </Panel>
+
+        <div className="flex flex-col gap-4 xl:w-84 xl:shrink-0">
+          <Panel className="flex flex-col gap-4">
+            <PanelKicker className="text-muted-foreground">{t.employees.recordTitle}</PanelKicker>
+            <dl className="flex flex-col gap-2 text-[13px]">
+              <Fact label={t.employees.deliveriesColumn} value={String(mine.length)} />
+              <Fact label={t.deliveries.filterAwaiting} value={String(awaiting)} />
+              <Fact
+                label={t.employees.phoneLabel}
+                value={employee.phoneE164 ? formatPhoneBr(employee.phoneE164) : "—"}
+              />
+              <Fact label={t.common.email} value={employee.email ?? "—"} />
+              <Fact
+                label={t.employees.dataOriginLabel}
+                value={
+                  employee.dataOrigin === "IMPORT"
+                    ? t.employees.dataOriginImport
+                    : employee.dataOrigin === "MANUAL"
+                      ? t.employees.dataOriginManual
+                      : employee.dataOrigin
+                }
+              />
+              {employee.terminatedOn ? (
+                <Fact
+                  label={t.employees.terminatedOnLabel}
+                  value={new Date(`${employee.terminatedOn}T00:00:00`).toLocaleDateString("pt-BR")}
+                />
+              ) : null}
+            </dl>
+          </Panel>
+
+          <Panel tone="secondary">
+            <PanelKicker className="text-muted-foreground">{t.employees.cpfLabel}</PanelKicker>
+            <p className="mt-2 font-mono text-lg font-bold">{employee.cpfMasked}</p>
+            <p className="mt-1.5 text-[12px] text-muted-foreground">{t.employees.cpfNotEditableHint}</p>
+          </Panel>
+        </div>
+      </div>
     </main>
+  );
+}
+
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 truncate text-right font-bold">{value}</dd>
+    </div>
   );
 }

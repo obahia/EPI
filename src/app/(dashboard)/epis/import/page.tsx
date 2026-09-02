@@ -1,11 +1,11 @@
 import { redirect } from "next/navigation";
 import { verifySession, getMyCompanies, getMyMemberships } from "@/lib/supabase/dal";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary } from "@/i18n/dictionaries";
-import { EpiCreateForm } from "./epi-form";
+import { PageHeader } from "@/components/page-header";
+import { EpiImportWizard } from "./epi-import-wizard";
 
-export default async function NewEpiPage({
+export default async function ImportEpisPage({
   searchParams,
 }: {
   searchParams: Promise<{ company?: string }>;
@@ -26,29 +26,26 @@ export default async function NewEpiPage({
 
   // Only offer the "catálogo compartilhado da organização" option when the caller has an
   // org-wide ORG_ADMIN membership for this company's organization -- api.create_epi
-  // enforces this too, but a company-scoped user should never even see the choice.
+  // enforces this too, but a company-scoped user should never even see the choice. Same
+  // rule the manual create form (epis/new/page.tsx) applies.
   const memberships = await getMyMemberships();
   const canCreateOrgWide = memberships.some(
     (m) => m.companyId === null && m.organizationId === company.organizationId && m.role === "ORG_ADMIN",
   );
 
   return (
-    <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
-      <h1 className="font-heading text-4xl font-extrabold tracking-tight">{t.epis.newEpi}</h1>
-      <p className="text-sm text-muted-foreground">{company.legalName}</p>
+    <main className="flex flex-1 flex-col gap-5 p-4 md:p-7.5">
+      <PageHeader
+        back={{ href: `/epis?company=${company.id}`, label: t.epis.backToCatalog }}
+        kicker={company.legalName}
+        title={t.epis.importCatalog}
+      />
 
-      <Card className="max-w-lg">
-        <CardHeader>
-          <CardTitle>{t.epis.epiDataCardTitle}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <EpiCreateForm
-            organizationId={company.organizationId}
-            companyId={company.id}
-            canCreateOrgWide={canCreateOrgWide}
-          />
-        </CardContent>
-      </Card>
+      <EpiImportWizard
+        organizationId={company.organizationId}
+        companyId={company.id}
+        canCreateOrgWide={canCreateOrgWide}
+      />
     </main>
   );
 }

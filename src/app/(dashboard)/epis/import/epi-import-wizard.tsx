@@ -7,65 +7,60 @@ import { Button } from "@/components/ui/button";
 import { Panel, PanelKicker, PanelTitle } from "@/components/panel";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { useLocale, useT } from "@/i18n/provider";
+import { useT } from "@/i18n/provider";
 import type { Dict } from "@/i18n/dictionaries";
 import {
-  IMPORT_FIELDS,
-  REQUIRED_IMPORT_FIELDS,
-  validateImportRows,
-  type ColumnMapping,
-  type ImportField,
+  EPI_IMPORT_FIELDS,
+  REQUIRED_EPI_IMPORT_FIELDS,
+  validateEpiImportRows,
+  type EpiColumnMapping,
+  type EpiImportField,
+  type EpiValidationResult,
   type ParsedCsvRow,
-  type ValidationResult,
-} from "@/lib/csv-import/validate-rows";
-import { commitEmployeeImportChunk, revalidateEmployeesAfterImport } from "./import-actions";
+} from "@/lib/csv-import/validate-epi-rows";
+import { commitEpiImportChunk, revalidateEpisAfterImport } from "./import-actions";
 
-// Hard cap mirrors api.import_employees_commit's own limit (batch_too_large, code 54000,
-// supabase/migrations/20260831150200_employee_rpcs.sql) -- refused here with a clear
-// message rather than letting the RPC reject it blind partway through a long upload.
-const MAX_TOTAL_ROWS = 20_000;
-// Client-side chunk size for sequential commits -- keeps each Server Action call's body
-// small and gives the user real progress feedback on a large file. Must stay <=
-// MAX_ROWS_PER_CALL in import-actions.ts.
-const CHUNK_SIZE = 2000;
-// How many mapped rows the "de -> para" table shows an example value from.
+// One round trip per row on the server (see import-actions.ts) -- keep the chunk small so
+// the progress line actually moves.
+const CHUNK_SIZE = 50;
+// A catalog is dozens of entries, not thousands. This is a sanity guard against someone
+// pointing the importer at an employee export by mistake, not a capacity limit.
+const MAX_TOTAL_ROWS = 5_000;
 const EXAMPLE_ROW = 0;
 
-function fieldLabels(t: Dict): Record<ImportField, string> {
+function fieldLabels(t: Dict): Record<EpiImportField, string> {
   return {
-    full_name: t.employees.fullNameLabel,
-    cpf: t.employees.cpfLabel,
-    registration_number: t.employees.registrationNumberLabel,
-    phone: t.employees.phoneLabel,
-    email: t.common.email,
-    position_title: t.employees.positionLabel,
-    department: t.employees.departmentLabel,
+    name: t.common.name,
+    ca_number: t.epis.caLabel,
+    manufacturer: t.epis.manufacturerLabel,
+    model: t.epis.modelLabel,
+    description: t.epis.descriptionLabel,
+    default_unit: t.epis.defaultUnitLabel,
   };
 }
 
 // Loose header-name guesses to pre-fill the mapping step -- purely a UX convenience, the
 // user reviews and can override every field before importing.
-const HEADER_GUESSES: Record<ImportField, string[]> = {
-  full_name: ["nome", "nomecompleto", "funcionario", "colaborador", "name"],
-  cpf: ["cpf"],
-  registration_number: ["matricula", "registro", "registration", "codigo"],
-  phone: ["telefone", "celular", "fone", "phone", "whatsapp"],
-  email: ["email", "e-mail"],
-  position_title: ["cargo", "funcao", "posicao", "position"],
-  department: ["departamento", "setor", "department", "area"],
+const HEADER_GUESSES: Record<EpiImportField, string[]> = {
+  name: ["nome", "epi", "equipamento", "descricaoepi", "name", "item"],
+  ca_number: ["ca", "canumero", "numeroca", "numerodoca", "certificado", "certificadoaprovacao"],
+  manufacturer: ["fabricante", "marca", "manufacturer", "brand"],
+  model: ["modelo", "model", "referencia", "ref"],
+  description: ["descricao", "description", "obs", "observacao", "detalhes"],
+  default_unit: ["unidade", "und", "un", "unidademedida", "unit"],
 };
 
 function normalizeHeader(header: string): string {
   return header
     .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "") // strip combining diacritics
+    .replace(/\p{Diacritic}/gu, "")
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 }
 
-function guessMapping(headers: string[]): ColumnMapping {
-  const mapping: ColumnMapping = {};
-  for (const field of IMPORT_FIELDS) {
+function guessMapping(headers: string[]): EpiColumnMapping {
+  const mapping: EpiColumnMapping = {};
+  for (const field of EPI_IMPORT_FIELDS) {
     const guesses = HEADER_GUESSES[field];
     const match = headers.find((h) => guesses.includes(normalizeHeader(h)));
     if (match) mapping[field] = match;
@@ -73,7 +68,7 @@ function guessMapping(headers: string[]): ColumnMapping {
   return mapping;
 }
 
-function errorsToCsv(errors: ValidationResult["errors"], t: Dict): string {
+function errorsToCsv(errors: EpiValidationResult["errors"], t: Dict): string {
   const lines = [`${t.employees.rowLabel},${t.employees.reasonLabel}`];
   for (const e of errors) {
     lines.push(`${e.rowNumber},"${e.reasons.join("; ").replace(/"/g, '""')}"`);
@@ -97,40 +92,47 @@ const selectClassName = cn(
 );
 
 type Step = "upload" | "map" | "committing" | "done";
-
 const STEP_INDEX: Record<Step, number> = { upload: 1, map: 2, committing: 3, done: 3 };
 
 type CommitProgress = {
   processedChunks: number;
   totalChunks: number;
   created: number;
-  updated: number;
+  alreadyInCatalog: number;
   skipped: number;
+  failures: { caNumber: string; error: string }[];
 };
 
 /**
- * CSV import, laid out from the mockup (screen 4g). The mockup shows one "conferir as
- * colunas" screen that carries the column mapping *and* the problem report side by side,
- * so validation runs live off the current mapping rather than behind a separate "validar"
- * step -- it is pure client-side work (validateImportRows) and nothing is sent to the
- * server until the final commit, exactly as before.
+ * CSV catalog import, built to the same shape as the employee importer (mockup screen 4g):
+ * upload, then one screen carrying the column mapping and the problem report side by side,
+ * then commit. Validation runs live off the current mapping -- it is pure client-side work
+ * (validateEpiImportRows) and nothing reaches the server until the final commit.
  */
-export function ImportWizard({ companyId }: { companyId: string }) {
+export function EpiImportWizard({
+  organizationId,
+  companyId,
+  canCreateOrgWide,
+}: {
+  organizationId: string;
+  companyId: string;
+  canCreateOrgWide: boolean;
+}) {
   const t = useT();
-  const locale = useLocale();
   const FIELD_LABELS = fieldLabels(t);
   const [step, setStep] = useState<Step>("upload");
   const [fileName, setFileName] = useState<string | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<ParsedCsvRow[]>([]);
-  const [mapping, setMapping] = useState<ColumnMapping>({});
+  const [mapping, setMapping] = useState<EpiColumnMapping>({});
+  const [scope, setScope] = useState<"company" | "org">("company");
   const [commitError, setCommitError] = useState<string | null>(null);
   const [progress, setProgress] = useState<CommitProgress | null>(null);
 
-  const mappingComplete = REQUIRED_IMPORT_FIELDS.every((f) => !!mapping[f]);
+  const mappingComplete = REQUIRED_EPI_IMPORT_FIELDS.every((f) => !!mapping[f]);
   const validation = useMemo(
-    () => (mappingComplete ? validateImportRows(rows, mapping) : null),
+    () => (mappingComplete ? validateEpiImportRows(rows, mapping) : null),
     [mappingComplete, rows, mapping],
   );
 
@@ -170,22 +172,24 @@ export function ImportWizard({ companyId }: { companyId: string }) {
     }
 
     let created = 0;
-    let updated = 0;
+    let alreadyInCatalog = 0;
     let skipped = 0;
-    setProgress({ processedChunks: 0, totalChunks: chunks.length, created, updated, skipped });
+    const failures: { caNumber: string; error: string }[] = [];
+    setProgress({ processedChunks: 0, totalChunks: chunks.length, created, alreadyInCatalog, skipped, failures });
 
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i]!;
-      const result = await commitEmployeeImportChunk(
+      const result = await commitEpiImportChunk(
+        organizationId,
         companyId,
+        scope,
         chunk.map((r) => ({
-          fullName: r.fullName,
-          cpf: r.cpf,
-          registrationNumber: r.registrationNumber,
-          phone: r.phone,
-          email: r.email,
-          positionTitle: r.positionTitle,
-          department: r.department,
+          name: r.name,
+          caNumber: r.caNumber,
+          manufacturer: r.manufacturer,
+          model: r.model,
+          description: r.description,
+          defaultUnit: r.defaultUnit,
         })),
       );
 
@@ -193,18 +197,33 @@ export function ImportWizard({ companyId }: { companyId: string }) {
         setCommitError(
           `${result.error} (${t.employees.batch.toLowerCase()} ${i + 1} ${t.employees.ofConnector} ${chunks.length} -- ${t.employees.batchErrorNote})`,
         );
-        setProgress({ processedChunks: i, totalChunks: chunks.length, created, updated, skipped });
+        setProgress({
+          processedChunks: i,
+          totalChunks: chunks.length,
+          created,
+          alreadyInCatalog,
+          skipped,
+          failures,
+        });
         setStep("done");
         return;
       }
 
       created += result.created;
-      updated += result.updated;
+      alreadyInCatalog += result.alreadyInCatalog;
       skipped += result.skipped;
-      setProgress({ processedChunks: i + 1, totalChunks: chunks.length, created, updated, skipped });
+      failures.push(...result.failures);
+      setProgress({
+        processedChunks: i + 1,
+        totalChunks: chunks.length,
+        created,
+        alreadyInCatalog,
+        skipped,
+        failures: [...failures],
+      });
     }
 
-    await revalidateEmployeesAfterImport();
+    await revalidateEpisAfterImport();
     setStep("done");
   }
 
@@ -221,8 +240,11 @@ export function ImportWizard({ companyId }: { companyId: string }) {
 
       {step === "upload" ? (
         <Panel className="flex flex-col gap-3.5">
-          <PanelTitle>{t.employees.importStep1Title}</PanelTitle>
-          <p className="text-[13px] text-muted-foreground">{t.employees.importStep1Description}</p>
+          <PanelTitle>{t.epis.importStep1Title}</PanelTitle>
+          <p className="text-[13px] text-muted-foreground">{t.epis.importStep1Description}</p>
+          <p className="rounded-2xl bg-secondary px-4 py-3 font-mono text-[12px] text-muted-foreground">
+            {t.epis.importHeaderExample}
+          </p>
           <input
             type="file"
             accept=".csv,text/csv"
@@ -274,9 +296,9 @@ export function ImportWizard({ companyId }: { companyId: string }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {IMPORT_FIELDS.map((field) => {
+                  {EPI_IMPORT_FIELDS.map((field) => {
                     const header = mapping[field];
-                    const required = REQUIRED_IMPORT_FIELDS.includes(field);
+                    const required = REQUIRED_EPI_IMPORT_FIELDS.includes(field);
                     const example = header ? (rows[EXAMPLE_ROW]?.[header] ?? "") : "";
                     return (
                       <TableRow key={field}>
@@ -312,14 +334,37 @@ export function ImportWizard({ companyId }: { companyId: string }) {
                 </TableBody>
               </Table>
             </Panel>
+
+            {canCreateOrgWide ? (
+              <Panel className="flex flex-col gap-2.5">
+                <PanelKicker className="text-muted-foreground">{t.epis.catalogLabel}</PanelKicker>
+                {(
+                  [
+                    ["company", t.epis.scopeCompanyOnly],
+                    ["org", t.epis.scopeOrgWide],
+                  ] as const
+                ).map(([value, label]) => (
+                  <label key={value} className="flex cursor-pointer items-center gap-2.5 text-[13.5px]">
+                    <input
+                      type="radio"
+                      name="scope"
+                      value={value}
+                      checked={scope === value}
+                      onChange={() => setScope(value)}
+                      className="accent-primary"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </Panel>
+            ) : null}
           </div>
 
           <ReviewColumn
             validation={validation}
             mappingComplete={mappingComplete}
-            locale={locale}
             onImport={commitImport}
-            onDownloadErrors={(errors) => downloadCsv("erros-importacao.csv", errorsToCsv(errors, t))}
+            onDownloadErrors={(errors) => downloadCsv("erros-importacao-epis.csv", errorsToCsv(errors, t))}
             t={t}
           />
         </div>
@@ -327,10 +372,10 @@ export function ImportWizard({ companyId }: { companyId: string }) {
 
       {step === "committing" ? (
         <Panel className="flex flex-col gap-2">
-          <PanelTitle>{t.employees.importing}</PanelTitle>
+          <PanelTitle>{t.epis.importing}</PanelTitle>
           <p className="text-[13px] text-muted-foreground">
             {progress
-              ? `${t.employees.batch} ${progress.processedChunks} ${t.employees.ofConnector} ${progress.totalChunks}…`
+              ? `${t.employees.batch} ${progress.processedChunks} ${t.employees.ofConnector} ${progress.totalChunks} · ${progress.created} ${t.epis.importCreatedSuffix}`
               : t.employees.preparing}
           </p>
         </Panel>
@@ -338,14 +383,31 @@ export function ImportWizard({ companyId }: { companyId: string }) {
 
       {step === "done" ? (
         <Panel className="flex flex-col items-start gap-3.5">
-          <PanelTitle>{t.employees.importComplete}</PanelTitle>
+          <PanelTitle>{t.epis.importComplete}</PanelTitle>
           <p className="text-[13.5px]">
-            {progress?.created ?? 0} {t.employees.createdSuffix} {progress?.updated ?? 0} {t.employees.updatedSuffix}
+            {progress?.created ?? 0} {t.epis.importCreatedSuffix}
+            {progress && progress.alreadyInCatalog > 0
+              ? `, ${progress.alreadyInCatalog} ${t.epis.importAlreadyInCatalogSuffix}`
+              : ""}
             {progress && progress.skipped > 0 ? `, ${progress.skipped} ${t.employees.skippedSuffix}` : ""}.
           </p>
+          {progress && progress.failures.length > 0 ? (
+            <div className="w-full rounded-2xl bg-destructive-soft px-4 py-3">
+              <p className="text-[12.5px] font-bold text-destructive">
+                {progress.failures.length} {t.epis.importFailedRows}
+              </p>
+              <ul className="mt-1.5 flex flex-col gap-0.5 text-[12px]">
+                {progress.failures.slice(0, 5).map((failure) => (
+                  <li key={failure.caNumber}>
+                    <span className="font-mono">{failure.caNumber}</span> — {failure.error}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {commitError ? <p className="text-sm text-destructive">{commitError}</p> : null}
           <Button asChild size="lg">
-            <Link href={`/employees?company=${companyId}`}>{t.companies.viewEmployees}</Link>
+            <Link href={`/epis?company=${companyId}`}>{t.epis.backToCatalog}</Link>
           </Button>
         </Panel>
       ) : null}
@@ -359,10 +421,7 @@ function StepBar({ current, label, t }: { current: number; label: string; t: Dic
     <div className="flex flex-wrap items-center gap-4">
       <div className="flex gap-1.5">
         {[1, 2, 3].map((n) => (
-          <span
-            key={n}
-            className={cn("h-1.5 w-16 rounded-full", n <= current ? "bg-primary" : "bg-foreground/12")}
-          />
+          <span key={n} className={cn("h-1.5 w-16 rounded-full", n <= current ? "bg-primary" : "bg-foreground/12")} />
         ))}
       </div>
       <p className="text-[10.5px] font-bold tracking-[0.12em] text-muted-foreground uppercase">
@@ -394,27 +453,24 @@ function MappingState({ mapped, required, t }: { mapped: boolean; required: bool
   );
 }
 
-/** The mockup's right-hand column: what is wrong with the file, then what will happen. */
 function ReviewColumn({
   validation,
   mappingComplete,
-  locale,
   onImport,
   onDownloadErrors,
   t,
 }: {
-  validation: ValidationResult | null;
+  validation: EpiValidationResult | null;
   mappingComplete: boolean;
-  locale: string;
   onImport: () => void;
-  onDownloadErrors: (errors: ValidationResult["errors"]) => void;
+  onDownloadErrors: (errors: EpiValidationResult["errors"]) => void;
   t: Dict;
 }) {
   if (!mappingComplete || !validation) {
     return (
       <Panel tone="destructive" className="flex flex-col gap-2">
-        <PanelKicker className="text-destructive">{t.employees.importNameAndCpfRequired}</PanelKicker>
-        <p className="text-[12.5px] text-muted-foreground">{t.employees.importMapRequiredHint}</p>
+        <PanelKicker className="text-destructive">{t.epis.importNameAndCaRequired}</PanelKicker>
+        <p className="text-[12.5px] text-muted-foreground">{t.epis.importMapRequiredHint}</p>
       </Panel>
     );
   }
@@ -454,11 +510,10 @@ function ReviewColumn({
         <p className="font-heading text-5xl font-extrabold tracking-tighter tabular-nums">
           {validation.validRows.length}
         </p>
-        <p className="text-[13px] text-muted-foreground">{t.employees.importWillBeCreatedActive}</p>
+        <p className="text-[13px] text-muted-foreground">{t.epis.importWillBeCreated}</p>
         {overCap ? (
           <p className="text-[13px] text-destructive">
-            {t.employees.importOverCapPrefix} {MAX_TOTAL_ROWS.toLocaleString(locale === "pt" ? "pt-BR" : "en-US")}{" "}
-            {t.employees.importOverCapSuffix}
+            {t.epis.importOverCapPrefix} {MAX_TOTAL_ROWS.toLocaleString("pt-BR")} {t.epis.importOverCapSuffix}
           </p>
         ) : null}
         <Button
@@ -468,7 +523,7 @@ function ReviewColumn({
           onClick={onImport}
           disabled={validation.validRows.length === 0 || overCap}
         >
-          {t.employees.confirmImport}
+          {t.epis.confirmImport}
         </Button>
       </Panel>
     </div>

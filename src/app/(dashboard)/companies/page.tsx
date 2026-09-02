@@ -28,7 +28,7 @@ export default async function CompaniesPage() {
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
-      <h1 className="font-heading text-2xl font-medium tracking-tight">{t.nav.companies}</h1>
+      <h1 className="font-heading text-4xl font-extrabold tracking-tight">{t.nav.companies}</h1>
 
       <Card>
         <CardHeader>

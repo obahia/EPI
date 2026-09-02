@@ -26,7 +26,7 @@ export default async function NewEmployeePage({
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
-      <h1 className="font-heading text-2xl font-medium tracking-tight">{t.employees.newEmployee}</h1>
+      <h1 className="font-heading text-4xl font-extrabold tracking-tight">{t.employees.newEmployee}</h1>
       <p className="text-sm text-muted-foreground">{company.legalName}</p>
 
       <Card className="max-w-lg">

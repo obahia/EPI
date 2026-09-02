@@ -31,7 +31,7 @@ export default async function NewBatchPage({
   return (
     <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
       <div>
-        <h1 className="font-heading text-2xl font-medium tracking-tight">{t.deliveries.batchNewTitle}</h1>
+        <h1 className="font-heading text-4xl font-extrabold tracking-tight">{t.deliveries.batchNewTitle}</h1>
         <p className="text-sm text-muted-foreground">{company.legalName}</p>
       </div>
 

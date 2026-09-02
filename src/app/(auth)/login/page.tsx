@@ -7,56 +7,104 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { SealMark } from "@/components/seal-mark";
 import { useT } from "@/i18n/provider";
 import { signIn, signUp, type AuthActionState } from "./actions";
 
 const initialState: AuthActionState = { error: null };
 
+/** The mockup's fields: tall pills on a filled cream field rather than outlined boxes. */
+const FIELD_CLASS =
+  "h-13 rounded-full border-primary/35 bg-[color-mix(in_srgb,var(--foreground)_10%,var(--background))] px-5 text-base";
+
 type Mode = "signin" | "signup";
 
+/**
+ * Implemented from the mockup (screen 4a): a split screen, not a centered card --
+ * the form on the cream ground at the left, the marketing panel on the deeper
+ * cream at the right, sunburst bleeding out of its top corner and the NR-6 line
+ * anchored to its bottom. The one thing it drops from the mockup is that panel's
+ * pair of demo figures (142 entregas, 85% em 48 h): they are placeholder numbers,
+ * and an unauthenticated page must not present fabricated stats as real.
+ */
 export default function LoginPage() {
   const t = useT();
   const [mode, setMode] = useState<Mode>("signin");
 
   return (
-    <Card className="mx-4 w-full max-w-sm pb-0 shadow-2xs">
-      <CardHeader className="mt-4 mb-2 flex flex-col items-center gap-1 space-y-1 text-center">
-        <SealMark className="mb-2 size-10" />
-        <h2 className="font-heading text-balance text-2xl font-medium">
-          {mode === "signin" ? t.auth.signInTitle : t.auth.signUpTitle}
-        </h2>
-        <p className="text-pretty text-sm text-muted-foreground">
-          {mode === "signin" ? t.auth.signInSubtitle : t.auth.signUpSubtitle}
-        </p>
-      </CardHeader>
+    <main className="flex flex-1">
+      <div className="flex flex-1 flex-col justify-center px-6 py-16 sm:px-12 lg:px-24 xl:px-32">
+        <div className="flex w-full max-w-md flex-col">
+          <div className="mb-8 flex items-center gap-3">
+            <SealMark className="size-10" />
+            <span className="font-heading text-xl font-extrabold tracking-tight">{t.brand.name}</span>
+          </div>
 
-      {/* Keyed by mode: forces a fresh instance (fresh useActionState/local state) on
-          every sign-in <-> sign-up switch, so an error from one mode never leaks into
-          the other -- useActionState has no external reset, remounting is the only way. */}
-      <LoginForm key={mode} mode={mode} />
-
-      <CardFooter className="flex justify-center py-4!">
-        <p className="text-pretty text-center text-sm text-muted-foreground">
           {mode === "signin" ? (
             <>
-              {t.auth.signUpPrompt}{" "}
-              <button type="button" onClick={() => setMode("signup")} className="cursor-pointer text-primary hover:underline">
-                {t.auth.signUpCta}
-              </button>
+              <h1 className="font-heading text-4xl font-extrabold tracking-tight text-balance sm:text-5xl">
+                {t.auth.marketingHeadline}
+              </h1>
+              <p className="mt-5 max-w-sm text-lg text-muted-foreground">{t.auth.marketingSubtitle}</p>
             </>
           ) : (
             <>
-              {t.auth.signInPrompt}{" "}
-              <button type="button" onClick={() => setMode("signin")} className="cursor-pointer text-primary hover:underline">
-                {t.auth.signInCta}
-              </button>
+              <h1 className="font-heading text-4xl font-extrabold tracking-tight">{t.auth.signUpTitle}</h1>
+              <p className="mt-2 text-muted-foreground">{t.auth.signUpSubtitle}</p>
             </>
           )}
-        </p>
-      </CardFooter>
-    </Card>
+
+          <LoginForm key={mode} mode={mode} />
+
+          <p className="mt-4 text-sm text-muted-foreground">
+            {mode === "signin" ? (
+              <>
+                {t.auth.signUpPrompt}{" "}
+                <button
+                  type="button"
+                  onClick={() => setMode("signup")}
+                  className="cursor-pointer font-bold text-primary-deep underline underline-offset-4"
+                >
+                  {t.auth.signUpCta}
+                </button>
+              </>
+            ) : (
+              <>
+                {t.auth.signInPrompt}{" "}
+                <button
+                  type="button"
+                  onClick={() => setMode("signin")}
+                  className="cursor-pointer font-bold text-primary-deep underline underline-offset-4"
+                >
+                  {t.auth.signInCta}
+                </button>
+              </>
+            )}
+          </p>
+        </div>
+      </div>
+
+      <div className="relative hidden w-[38%] max-w-[520px] shrink-0 flex-col justify-end overflow-hidden bg-secondary p-14 lg:flex">
+        <div
+          className="absolute -top-24 -right-36 size-[440px] rounded-full"
+          style={{
+            background: "repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--primary) 28%, transparent) 0deg 3deg, transparent 3deg 22.5deg)",
+          }}
+          aria-hidden="true"
+        />
+        <div
+          className="absolute top-2 -right-10 size-[280px] rounded-full border-8"
+          style={{ borderColor: "color-mix(in srgb, var(--primary) 28%, transparent)" }}
+          aria-hidden="true"
+        />
+        <div className="relative">
+          <p className="text-xs font-bold tracking-[0.09em] text-primary-deep uppercase">{t.auth.marketingKicker}</p>
+          <p className="mt-3 max-w-xs font-heading text-2xl font-extrabold tracking-tight">
+            {t.auth.marketingQuote}
+          </p>
+        </div>
+      </div>
+    </main>
   );
 }
 
@@ -70,100 +118,90 @@ function LoginForm({ mode }: { mode: Mode }) {
   const passwordsMismatch = mode === "signup" && passwordConfirm.length > 0 && password !== passwordConfirm;
 
   return (
-    <CardContent className="space-y-6">
-      <form action={formAction} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="email">{t.auth.emailLabel}</Label>
-          <Input id="email" name="email" type="email" autoComplete="email" required />
+    <form action={formAction} className="mt-8 flex flex-col gap-4">
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="email">{t.auth.emailLabel}</Label>
+        <Input id="email" name="email" type="email" autoComplete="email" className={FIELD_CLASS} required />
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="password">{t.auth.passwordLabel}</Label>
+        <div className="relative">
+          <Input
+            className={`${FIELD_CLASS} pe-10`}
+            id="password"
+            name="password"
+            type={isPasswordVisible ? "text" : "password"}
+            autoComplete={mode === "signin" ? "current-password" : "new-password"}
+            minLength={8}
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <button
+            aria-controls="password"
+            aria-label={isPasswordVisible ? t.auth.hidePassword : t.auth.showPassword}
+            aria-pressed={isPasswordVisible}
+            className="absolute inset-y-0 end-0 flex h-full w-10 cursor-pointer items-center justify-center rounded-e-full text-muted-foreground/80 outline-none transition-[color,box-shadow] hover:text-foreground focus:z-10 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            onClick={() => setIsPasswordVisible((prev) => !prev)}
+            type="button"
+          >
+            {isPasswordVisible ? <EyeOffIcon aria-hidden="true" size={17} /> : <EyeIcon aria-hidden="true" size={17} />}
+          </button>
         </div>
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="password">{t.auth.passwordLabel}</Label>
-            {mode === "signin" ? (
-              <Link href="/forgot-password" className="text-sm text-primary hover:underline">
-                {t.auth.forgotPassword}
-              </Link>
-            ) : null}
-          </div>
+      </div>
+
+      {mode === "signup" ? (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="passwordConfirm">{t.auth.passwordConfirmLabel}</Label>
           <div className="relative">
             <Input
-              className="pe-9"
-              id="password"
-              name="password"
-              type={isPasswordVisible ? "text" : "password"}
-              autoComplete={mode === "signin" ? "current-password" : "new-password"}
+              className={`${FIELD_CLASS} pe-10`}
+              id="passwordConfirm"
+              name="passwordConfirm"
+              type={isPasswordConfirmVisible ? "text" : "password"}
+              autoComplete="new-password"
               minLength={8}
               required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              aria-invalid={passwordsMismatch}
+              value={passwordConfirm}
+              onChange={(e) => setPasswordConfirm(e.target.value)}
             />
             <button
-              aria-controls="password"
-              aria-label={isPasswordVisible ? t.auth.hidePassword : t.auth.showPassword}
-              aria-pressed={isPasswordVisible}
-              className="absolute inset-y-0 end-0 flex h-full w-9 cursor-pointer items-center justify-center rounded-e-md text-muted-foreground/80 outline-none transition-[color,box-shadow] hover:text-foreground focus:z-10 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              onClick={() => setIsPasswordVisible((prev) => !prev)}
+              aria-controls="passwordConfirm"
+              aria-label={isPasswordConfirmVisible ? t.auth.hidePassword : t.auth.showPassword}
+              aria-pressed={isPasswordConfirmVisible}
+              className="absolute inset-y-0 end-0 flex h-full w-10 cursor-pointer items-center justify-center rounded-e-full text-muted-foreground/80 outline-none transition-[color,box-shadow] hover:text-foreground focus:z-10 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              onClick={() => setIsPasswordConfirmVisible((prev) => !prev)}
               type="button"
             >
-              {isPasswordVisible ? (
-                <EyeOffIcon aria-hidden="true" size={16} />
+              {isPasswordConfirmVisible ? (
+                <EyeOffIcon aria-hidden="true" size={17} />
               ) : (
-                <EyeIcon aria-hidden="true" size={16} />
+                <EyeIcon aria-hidden="true" size={17} />
               )}
             </button>
           </div>
+          {passwordsMismatch ? <p className="text-sm text-destructive">{t.auth.resetMismatch}</p> : null}
         </div>
+      ) : null}
 
-        {mode === "signup" ? (
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="passwordConfirm">{t.auth.passwordConfirmLabel}</Label>
-            <div className="relative">
-              <Input
-                className="pe-9"
-                id="passwordConfirm"
-                name="passwordConfirm"
-                type={isPasswordConfirmVisible ? "text" : "password"}
-                autoComplete="new-password"
-                minLength={8}
-                required
-                aria-invalid={passwordsMismatch}
-                value={passwordConfirm}
-                onChange={(e) => setPasswordConfirm(e.target.value)}
-              />
-              <button
-                aria-controls="passwordConfirm"
-                aria-label={isPasswordConfirmVisible ? t.auth.hidePassword : t.auth.showPassword}
-                aria-pressed={isPasswordConfirmVisible}
-                className="absolute inset-y-0 end-0 flex h-full w-9 cursor-pointer items-center justify-center rounded-e-md text-muted-foreground/80 outline-none transition-[color,box-shadow] hover:text-foreground focus:z-10 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                onClick={() => setIsPasswordConfirmVisible((prev) => !prev)}
-                type="button"
-              >
-                {isPasswordConfirmVisible ? (
-                  <EyeOffIcon aria-hidden="true" size={16} />
-                ) : (
-                  <EyeIcon aria-hidden="true" size={16} />
-                )}
-              </button>
-            </div>
-            {passwordsMismatch ? <p className="text-sm text-destructive">{t.auth.resetMismatch}</p> : null}
-          </div>
-        ) : null}
+      {mode === "signin" ? (
+        <div className="mt-1 flex items-center justify-between gap-4">
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <Checkbox id="remember" />
+            {t.auth.rememberMe}
+          </label>
+          <Link href="/forgot-password" className="text-sm font-bold text-primary-deep underline underline-offset-4">
+            {t.auth.forgotPassword}
+          </Link>
+        </div>
+      ) : null}
 
-        {mode === "signin" ? (
-          <div className="flex items-center space-x-2">
-            <Checkbox defaultChecked id="remember" />
-            <Label className="text-sm font-normal" htmlFor="remember">
-              {t.auth.rememberMe}
-            </Label>
-          </div>
-        ) : null}
+      {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
 
-        {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
-
-        <Button className="w-full" type="submit" disabled={pending || passwordsMismatch}>
-          {pending ? t.common.loading : mode === "signin" ? t.auth.signInCta : t.auth.signUpCta}
-        </Button>
-      </form>
-    </CardContent>
+      <Button className="mt-2 h-14 text-base" type="submit" disabled={pending || passwordsMismatch}>
+        {pending ? t.common.loading : mode === "signin" ? t.auth.signInCta : t.auth.signUpCta}
+      </Button>
+    </form>
   );
 }

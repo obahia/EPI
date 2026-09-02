@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Layers } from "lucide-react";
-import { verifySession, getMyCompanies, getDeliveryBatches } from "@/lib/supabase/dal";
+import { verifySession, getMyCompanies, getDeliveryBatches, type DeliveryBatch } from "@/lib/supabase/dal";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CompanyChooser } from "@/components/company-chooser";
 import { EmptyState } from "@/components/empty-state";
+import { PageHeader } from "@/components/page-header";
+import { Panel, PanelFooter, PanelKicker } from "@/components/panel";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary, type Dict } from "@/i18n/dictionaries";
 
@@ -27,89 +27,143 @@ export default async function DeliveryBatchesPage({
   }
 
   const { company: companyParam } = await searchParams;
-  const activeCompany =
-    companies.find((c) => c.id === companyParam) ?? (companies.length === 1 ? companies[0]! : null);
+  const activeCompany = companies.find((c) => c.id === companyParam) ?? companies[0]!;
+  const batches = await getDeliveryBatches(activeCompany.id);
 
   return (
-    <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="font-heading text-2xl font-medium tracking-tight">{t.deliveries.batchesTitle}</h1>
-          <Link href="/deliveries" className="text-sm text-muted-foreground underline-offset-4 hover:underline">
-            {t.deliveries.backToDeliveries}
-          </Link>
-        </div>
-        {activeCompany ? (
-          <Button asChild>
+    <main className="flex flex-1 flex-col gap-5 p-4 md:p-7.5">
+      <PageHeader
+        kicker={activeCompany.legalName}
+        title={t.deliveries.batchesTitle}
+        actions={
+          <Button asChild size="lg">
             <Link href={`/deliveries/batch/new?company=${activeCompany.id}`}>{t.deliveries.newBatch}</Link>
           </Button>
-        ) : null}
-      </div>
-
-      <CompanyChooser
-        companies={companies}
-        activeCompanyId={activeCompany?.id}
-        basePath="/deliveries/batches"
-        title={t.deliveries.companyCardTitle}
+        }
       />
 
-      {!activeCompany ? (
-        <p className="text-sm text-muted-foreground">{t.deliveries.selectCompanyPromptBatches}</p>
+      {batches.length === 0 ? (
+        <Panel>
+          <EmptyState icon={Layers} message={t.deliveries.noBatchesYet} />
+        </Panel>
       ) : (
-        <BatchTable companyId={activeCompany.id} t={t} />
+        <>
+          <LatestBatch batch={batches[0]!} t={t} />
+          <Panel>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t.deliveries.deliveryDateLabel}</TableHead>
+                  <TableHead>{t.deliveries.createdAtColumn}</TableHead>
+                  <TableHead className="text-right">{t.deliveries.totalColumn}</TableHead>
+                  <TableHead className="text-right">{t.deliveries.confirmedColumn}</TableHead>
+                  <TableHead className="text-right">{t.deliveries.contestedColumn}</TableHead>
+                  <TableHead className="text-right">{t.deliveries.cancelledColumn}</TableHead>
+                  <TableHead className="w-45">{t.deliveries.progressColumn}</TableHead>
+                  <TableHead className="text-right">{t.common.action}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {batches.map((batch) => (
+                  <BatchRow key={batch.id} batch={batch} t={t} />
+                ))}
+              </TableBody>
+            </Table>
+
+            <PanelFooter>
+              <p>{t.deliveries.batchesFootnote}</p>
+            </PanelFooter>
+          </Panel>
+        </>
       )}
     </main>
   );
 }
 
-async function BatchTable({ companyId, t }: { companyId: string; t: Dict }) {
-  const batches = await getDeliveryBatches(companyId);
+function pendingOf(batch: DeliveryBatch): number {
+  return Math.max(0, batch.totalCount - batch.confirmedCount - batch.contestedCount - batch.cancelledCount);
+}
 
-  if (batches.length === 0) {
-    return (
-      <Card>
-        <CardContent>
-          <EmptyState icon={Layers} message={t.deliveries.noBatchesYet} />
-        </CardContent>
-      </Card>
-    );
-  }
+/**
+ * The newest batch as a terracotta banner, implemented from the mockup (screen 4h): a
+ * batch is one act whose outcome arrives over the following days, so the most recent one
+ * gets its running tally -- issued, confirmed, still waiting, disputed -- above the table
+ * of everything before it, with the way into it on the same line.
+ */
+function LatestBatch({ batch, t }: { batch: DeliveryBatch; t: Dict }) {
+  const date = new Date(`${batch.deliveryDate}T00:00:00`);
+  const pending = pendingOf(batch);
 
   return (
-    <Card>
-      <CardContent className="p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t.deliveries.deliveryDateLabel}</TableHead>
-              <TableHead>{t.deliveries.totalColumn}</TableHead>
-              <TableHead>{t.deliveries.confirmedColumn}</TableHead>
-              <TableHead>{t.deliveries.contestedColumn}</TableHead>
-              <TableHead>{t.deliveries.cancelledColumn}</TableHead>
-              <TableHead>{t.deliveries.createdAtColumn}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {batches.map((b) => (
-              <TableRow key={b.id}>
-                <TableCell>
-                  <Link
-                    href={`/deliveries/batches/${b.id}`}
-                    className="font-medium underline-offset-4 hover:underline"
-                  >
-                    {new Date(`${b.deliveryDate}T00:00:00`).toLocaleDateString("pt-BR")}
-                  </Link>
-                </TableCell>
-                <TableCell>{b.totalCount}</TableCell>
-                <TableCell>{b.confirmedCount}</TableCell>
-                <TableCell>{b.contestedCount}</TableCell>
-                <TableCell>{b.cancelledCount}</TableCell>
-                <TableCell>{new Date(b.createdAt).toLocaleString("pt-BR")}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+    <section className="rounded-3xl bg-primary px-7 py-6.5 text-primary-foreground">
+      <div className="flex flex-col gap-6 xl:flex-row xl:items-center">
+        <div className="xl:w-72 xl:shrink-0">
+          <PanelKicker className="opacity-85">
+            {t.deliveries.latestBatch} · {date.toLocaleDateString("pt-BR")}
+            {batch.note?.trim() ? ` · ${batch.note.trim()}` : ""}
+          </PanelKicker>
+          <p className="mt-1 font-heading text-6xl leading-none font-extrabold tracking-tighter tabular-nums">
+            {batch.totalCount}
+          </p>
+          <p className="mt-2 text-[13.5px] opacity-85">{t.deliveries.issuedAtOnce}</p>
+        </div>
+
+        <dl className="flex flex-1 flex-wrap gap-9">
+          <HeroStat value={batch.confirmedCount} label={t.deliveries.confirmedColumn} />
+          <HeroStat value={pending} label={t.deliveries.pendingColumn} />
+          <HeroStat value={batch.contestedCount} label={t.deliveries.contestedColumn} />
+        </dl>
+
+        <Button asChild size="lg" variant="secondary" className="bg-background text-primary-deep hover:bg-background/85">
+          <Link href={`/deliveries/batches/${batch.id}`}>{t.deliveries.openBatch}</Link>
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function HeroStat({ value, label }: { value: number; label: string }) {
+  return (
+    <div>
+      <dd className="font-heading text-3xl font-extrabold tracking-tighter tabular-nums">{value}</dd>
+      <dt className="text-[12.5px] lowercase opacity-85">{label}</dt>
+    </div>
+  );
+}
+
+function BatchRow({ batch, t }: { batch: DeliveryBatch; t: Dict }) {
+  const settledPct =
+    batch.totalCount > 0 ? Math.round((batch.confirmedCount / batch.totalCount) * 100) : 0;
+
+  return (
+    <TableRow>
+      <TableCell className="font-bold tabular-nums">
+        {new Date(`${batch.deliveryDate}T00:00:00`).toLocaleDateString("pt-BR")}
+      </TableCell>
+      <TableCell className="text-muted-foreground tabular-nums">
+        {new Date(batch.createdAt).toLocaleString("pt-BR")}
+      </TableCell>
+      <TableCell className="text-right tabular-nums">{batch.totalCount}</TableCell>
+      <TableCell className="text-right tabular-nums">{batch.confirmedCount}</TableCell>
+      <TableCell className="text-right tabular-nums">{batch.contestedCount}</TableCell>
+      <TableCell className="text-right tabular-nums">{batch.cancelledCount}</TableCell>
+      <TableCell>
+        <div
+          className="h-2 overflow-hidden rounded-full bg-foreground/9"
+          role="img"
+          aria-label={`${settledPct}%`}
+        >
+          <div className="h-full bg-success" style={{ width: `${settledPct}%` }} />
+        </div>
+      </TableCell>
+      <TableCell className="text-right">
+        <Link
+          href={`/deliveries/batches/${batch.id}`}
+          className="font-bold text-primary-deep underline-offset-4 hover:underline"
+        >
+          {t.deliveries.openBatch}
+        </Link>
+      </TableCell>
+    </TableRow>
   );
 }

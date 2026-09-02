@@ -7,9 +7,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-heading: var(--font-heading);
+  --font-heading: var(--font-sans);
   --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -56,99 +56,100 @@
 
 /*
  * Selo -- design tokens.
- * Brand palette (user-specified, replaces the earlier carimbo-violet draft):
- * Lavender Blush #f5e6e8, Thistle #d5c6e0, Lilac Ash #aaa1c8, Dusty Mauve #967aa1,
- * Space Indigo #192a51 -- a pink-to-indigo gradient. Space Indigo carries
- * ink/primary duty (dark enough for real contrast), Lavender Blush is the page
- * ground, Thistle/Lilac Ash/Dusty Mauve cover soft surfaces, borders, and focus
- * rings. Status colors (destructive/success/warning) are not part of the given
- * palette and were tuned separately to sit comfortably alongside it.
+ * "Organic" palette, implemented from the Selo Desktop design (Claude Design
+ * project, 8 full 1440x900 screens: login, operational dashboard, deliveries,
+ * delivery detail, EPI catalog, employees, employee import, delivery batches).
+ * Warm cream ground (#f5ead8) + terracotta accent (#c67139) + olive secondary
+ * accent (#7a8a5e) -- replaces the earlier Space Indigo/Lavender palette,
+ * which the design supersedes. The auth flow no longer gets a separate dark
+ * theme: the source login screen (4a) is on this same light palette.
  */
 :root {
-  --background: #f5e6e8;
-  --foreground: #192a51;
-  --card: #ffffff;
-  --card-foreground: #192a51;
-  --popover: #ffffff;
-  --popover-foreground: #192a51;
-  --primary: #192a51;
-  --primary-deep: #967aa1;
-  --primary-foreground: #ffffff;
-  --secondary: #d5c6e0;
-  --secondary-foreground: #192a51;
-  --muted: #efe1e6;
-  --muted-foreground: #7d6f88;
-  --accent: #d5c6e0;
-  --accent-foreground: #192a51;
+  --background: #f5ead8;
+  --foreground: #201e1d;
+  --card: #fff9ef;
+  --card-foreground: #201e1d;
+  --popover: #fff9ef;
+  --popover-foreground: #201e1d;
+  --primary: #c67139;
+  --primary-deep: #8c491a;
+  --primary-foreground: #f5ead8;
+  --secondary: #ebddc5;
+  --secondary-foreground: #201e1d;
+  --muted: #ebddc5;
+  --muted-foreground: #645c50;
+  --accent: #ebddc5;
+  --accent-foreground: #201e1d;
   --destructive: #9c3652;
   --destructive-soft: #f8e2e7;
-  --success: #2f6b52;
-  --success-soft: #e1efe7;
-  --warning: #8a6220;
-  --warning-soft: #f3e8d3;
-  --border: #e3d3dc;
-  --input: #ddc9d6;
-  --ring: #aaa1c8;
-  --chart-1: #192a51;
-  --chart-2: #967aa1;
-  --chart-3: #aaa1c8;
-  --chart-4: #d5c6e0;
-  --chart-5: #7d6f88;
-  --radius: 0.5rem;
-  --sidebar: #ffffff;
-  --sidebar-foreground: #192a51;
-  --sidebar-primary: #192a51;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #d5c6e0;
-  --sidebar-accent-foreground: #192a51;
-  --sidebar-border: #e3d3dc;
-  --sidebar-ring: #aaa1c8;
+  --success: #56633f;
+  --success-soft: #e1eecc;
+  --warning: #8c491a;
+  --warning-soft: #ffe1d0;
+  --border: color-mix(in srgb, #201e1d 16%, transparent);
+  --input: color-mix(in srgb, #201e1d 20%, transparent);
+  --ring: #c67139;
+  --chart-1: #c67139;
+  --chart-2: #d67f48;
+  --chart-3: #f6a06b;
+  --chart-4: #ffc6a5;
+  --chart-5: #ffe1d0;
+  --radius: 1.25rem;
+  /* The sidebar is a deeper tone of the same cream ground rather than a
+     contrasting column -- sampled straight off the mockup (#ebddc5, the same
+     value as --secondary). Hierarchy comes from the terracotta active pill,
+     not from a dark field, so ink text reads on it exactly as it does on the
+     page. */
+  --sidebar: #ebddc5;
+  --sidebar-foreground: #201e1d;
+  --sidebar-primary: #c67139;
+  --sidebar-primary-foreground: #f5ead8;
+  --sidebar-accent: #c67139;
+  --sidebar-accent-foreground: #f5ead8;
+  --sidebar-border: color-mix(in srgb, #201e1d 14%, transparent);
+  --sidebar-ring: #c67139;
 }
 
-/*
- * Near-black monochrome -- used only for the auth route group (login/forgot/reset),
- * scoped via the `dark` class in src/app/(auth)/layout.tsx, per explicit reference
- * screenshot. Never applied to the authenticated panel, which stays on the light
- * Selo palette above.
- */
+/* Dark companion, unused today (no `dark` class is applied anywhere in the
+   app) -- kept for parity with the rest of this token system. */
 .dark {
-  --background: #354f52;
-  --foreground: #f5f5f5;
-  --card: #161618;
-  --card-foreground: #f5f5f5;
-  --popover: #161618;
-  --popover-foreground: #f5f5f5;
-  --primary: #f2f2f2;
-  --primary-deep: #d4d4d8;
-  --primary-foreground: #111113;
-  --secondary: #1e1e21;
-  --secondary-foreground: #f5f5f5;
-  --muted: #1a1a1d;
-  --muted-foreground: #9a9aa1;
-  --accent: #1e1e21;
-  --accent-foreground: #f5f5f5;
-  --destructive: #e5707a;
-  --destructive-soft: #2f1a1d;
-  --success: #7fbfa0;
-  --success-soft: #17251f;
-  --warning: #d8b877;
-  --warning-soft: #2b2417;
-  --border: #29292d;
-  --input: #2c2c31;
-  --ring: #d4d4d8;
-  --chart-1: #f2f2f2;
-  --chart-2: #b8b8bd;
-  --chart-3: #8b8b91;
-  --chart-4: #5e5e64;
-  --chart-5: #3a3a3f;
-  --sidebar: #161618;
-  --sidebar-foreground: #f5f5f5;
-  --sidebar-primary: #f2f2f2;
-  --sidebar-primary-foreground: #111113;
-  --sidebar-accent: #1e1e21;
-  --sidebar-accent-foreground: #f5f5f5;
-  --sidebar-border: #29292d;
-  --sidebar-ring: #d4d4d8;
+  --background: #201e1d;
+  --foreground: #f5ead8;
+  --card: #2b2724;
+  --card-foreground: #f5ead8;
+  --popover: #2b2724;
+  --popover-foreground: #f5ead8;
+  --primary: #e08a52;
+  --primary-deep: #f6a06b;
+  --primary-foreground: #201e1d;
+  --secondary: #383330;
+  --secondary-foreground: #f5ead8;
+  --muted: #322e2b;
+  --muted-foreground: #b6ab9c;
+  --accent: #383330;
+  --accent-foreground: #f5ead8;
+  --destructive: #e0879a;
+  --destructive-soft: #3a2228;
+  --success: #aebf92;
+  --success-soft: #2a3121;
+  --warning: #f0a768;
+  --warning-soft: #3a2c1c;
+  --border: color-mix(in srgb, #f5ead8 16%, transparent);
+  --input: color-mix(in srgb, #f5ead8 20%, transparent);
+  --ring: #e08a52;
+  --chart-1: #e08a52;
+  --chart-2: #d67f48;
+  --chart-3: #b2622d;
+  --chart-4: #8c491a;
+  --chart-5: #643312;
+  --sidebar: #2b2724;
+  --sidebar-foreground: #f5ead8;
+  --sidebar-primary: #e08a52;
+  --sidebar-primary-foreground: #201e1d;
+  --sidebar-accent: #e08a52;
+  --sidebar-accent-foreground: #201e1d;
+  --sidebar-border: color-mix(in srgb, #f5ead8 16%, transparent);
+  --sidebar-ring: #e08a52;
 }
 
 @layer base {
