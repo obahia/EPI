@@ -82,21 +82,32 @@ select ok(
   'tenant A user can see themself via api.users'
 );
 
+-- Every throws_ok() below passes NULL as the third (errmsg) argument on purpose: pgTAP's
+-- 3-argument form throws_ok(sql, errcode, X) treats X as the EXACT expected error message
+-- to compare against the raised one, not as a free-text description (confirmed against
+-- pgtap.org's own docs, which give NULL specifically as "one trick... allows you to still
+-- pass a description as the fourth argument"). Every call in this suite was written with a
+-- long, human-readable sentence in that slot -- never intended as literal Postgres error
+-- text -- so all of them failed on message mismatch despite the SQLSTATE itself being
+-- exactly right, undetected until CI actually ran this suite against a real Postgres.
 select throws_ok(
   $$ insert into app.organizations (kind, legal_name) values ('DIRECT', 'Escaped Org') $$,
   '42501',
+  NULL,
   'authenticated cannot INSERT into app.organizations directly (no grant, no policy -- creation is RPC-only, later phase)'
 );
 
 select throws_ok(
   $$ update app.organizations set legal_name = 'Renamed' where id = 'aaaaaaaa-0000-0000-0000-00000000000a' $$,
   '42501',
+  NULL,
   'authenticated cannot UPDATE app.organizations directly, even its own row (UPDATE fully revoked -- mass-assignment defence)'
 );
 
 select throws_ok(
   $$ select 1 from authz.memberships limit 1 $$,
   '42501',
+  NULL,
   'authenticated cannot read authz.memberships directly under any circumstance -- structurally unreachable, not merely unpolicied'
 );
 
@@ -105,6 +116,7 @@ select throws_ok(
   '42P01',  -- undefined_table: the schema/table doesn't exist yet in FASE 0 -- this
             -- assertion is a placeholder that will need updating to 42501 once FASE 5
             -- creates evidence.evidence_versions, to keep proving it stays unreachable.
+  NULL,
   'evidence schema objects do not exist yet in FASE 0 (placeholder -- revisit in FASE 5)'
 );
 

@@ -147,12 +147,16 @@ select results_eq(
   'tenant D sees exactly its own employee via api.employees, never tenant C''s'
 );
 
+-- NULL as the third (errmsg) arg: pgTAP's 3-arg throws_ok(sql, errcode, X) compares X
+-- against the ACTUAL raised message text, not a free-text description -- see the longer
+-- comment above the first throws_ok() in 010_tenant_isolation.sql for how that was found.
 select throws_ok(
   $$ select api.update_employee(
        (select id from fixture_ids where label = 'employee_c'),
        'Hijacked', null, null, null, null, null, 'ACTIVE'
      ) $$,
   '42501',
+  NULL,
   'tenant D cannot update tenant C''s employee via api.update_employee (insufficient_privilege)'
 );
 

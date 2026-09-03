@@ -9,7 +9,10 @@ create extension if not exists pgtap with schema extensions;
 
 begin;
 
-select plan(16);
+-- 20, not 16: the earlier count only tallied top-level `select is/ok/throws_ok(...)` calls
+-- and missed the four `perform is(...)` calls inside `do $$ ... end $$` blocks, which are
+-- real TAP assertions too and count toward the plan the same way.
+select plan(20);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -119,11 +122,15 @@ select ok((select id is not null from fixture_ids where label = 'cr'), 'manager 
 set local role authenticated;
 set local request.jwt.claims = '{"sub":"77777777-7777-7777-7777-777777777701","role":"authenticated"}';
 
+-- NULL as the third (errmsg) arg throughout this file: pgTAP's 3-arg throws_ok(sql,
+-- errcode, X) compares X against the ACTUAL raised message, not a free-text description --
+-- see the longer comment above the first throws_ok() in 010_tenant_isolation.sql.
 select throws_ok(
   $$ select api.create_confirmation_link(
        (select id from fixture_ids where label = 'delivery2'),
        (select extra from fixture_ids where label = 'cross_tenant_hash'), null) $$,
   '42501',
+  NULL,
   'tenant G cannot create a confirmation link for tenant F''s delivery'
 );
 
@@ -135,6 +142,7 @@ set local role anon;
 select throws_ok(
   $$ select 1 from app.confirmation_requests limit 1 $$,
   '42501',
+  NULL,
   'anon has no grant to read app.confirmation_requests directly'
 );
 
@@ -142,6 +150,7 @@ select throws_ok(
 select throws_ok(
   $$ select worker.open_link((select extra from fixture_ids where label = 'unknown_hash'), null) $$,
   'P0002',
+  NULL,
   'an unknown token hash returns the generic link_not_available error'
 );
 
@@ -222,12 +231,30 @@ select throws_ok(
        (select extra from fixture_ids where label = 'nonce'),
        'CONFIRM', false, null, null) $$,
   '40001',
+  NULL,
   'replaying a consumed nonce is rejected as a stale submission'
 );
 
 reset role;
 
--- Re-open to get a fresh nonce, then confirm for real.
+-- A self-consistent (bytes, hash) pair for the evidence payload -- same pattern as
+-- 050_evidence_sealing.sql. Computed as superuser (extensions.digest) before any role
+-- switch, same reasoning as the fixtures above.
+insert into fixture_ids values
+  ('canon_bytes', null, encode('{"_canon":"epi-canon/1","x":"fixture-040"}'::bytea, 'base64')),
+  ('canon_sha256', null, encode(extensions.digest('{"_canon":"epi-canon/1","x":"fixture-040"}'::bytea, 'sha256'), 'base64'));
+
+-- Re-open to get a fresh nonce, then confirm for real. worker.finish_confirmation has
+-- required a full evidence payload on every CONFIRM since FASE 5 (evidence.evidence_versions
+-- exists, docs/mvp-roadmap.md) -- "there is no code path that reaches CONFIRMED without
+-- sealing" per that RPC's own comment. This file predates FASE 5 and was never updated for
+-- it: the four payload args were missing here, so this call raised an uncaught
+-- evidence_payload_required and aborted the rest of the script (everything after this point
+-- in the file went unrun -- the TAP harness's "tests out of sequence" errors downstream were
+-- a symptom of that abort, not separate bugs). This file still only cares about the identity
+-- mechanics (right vs. wrong CPF digits) -- the sealing mechanics themselves (verification
+-- code, evidence_versions row, audit linkage) are 050's job, exhaustively -- so a minimal
+-- valid payload is enough here, not a repeat of 050's own assertions.
 do $$
 declare v_hash_b64 text; v_nonce text; v_result text;
 begin
@@ -235,7 +262,13 @@ begin
 
   set local role anon;
   select action_nonce into v_nonce from worker.open_link(v_hash_b64, null);
-  select result into v_result from worker.finish_confirmation(v_hash_b64, v_nonce, 'CONFIRM', true, null, null);
+  select result into v_result from worker.finish_confirmation(
+    v_hash_b64, v_nonce, 'CONFIRM', true, null, null,
+    '{"_canon":"epi-canon/1","x":"fixture-040"}'::jsonb,
+    (select extra from fixture_ids where label = 'canon_bytes'),
+    (select extra from fixture_ids where label = 'canon_sha256'),
+    clock_timestamp()
+  );
   reset role;
 
   update fixture_ids set extra = v_nonce where label = 'nonce';
@@ -262,12 +295,16 @@ select is(
 -- A second confirm attempt on the same (now-settled) confirmation_request must fail.
 set local role anon;
 
+-- Rejected before ever reaching the payload check (status is already CONFIRMED, so the
+-- function's own early status-guard raises link_not_available first) -- the missing
+-- evidence-payload args here are deliberate, not an oversight.
 select throws_ok(
   $$ select worker.finish_confirmation(
        (select extra from fixture_ids where label = 'cr'),
        (select extra from fixture_ids where label = 'nonce'),
        'CONFIRM', true, null, null) $$,
   'P0002',
+  NULL,
   'a second confirm attempt on an already-CONFIRMED row is rejected'
 );
 
@@ -307,6 +344,7 @@ set local request.jwt.claims = '{"sub":"66666666-6666-6666-6666-666666666601","r
 select throws_ok(
   $$ update audit.audit_events set event_type = 'HACKED' where organization_id = (select id from fixture_ids where label = 'org') $$,
   '42501',
+  NULL,
   'authenticated has no UPDATE grant on audit.audit_events at all'
 );
 

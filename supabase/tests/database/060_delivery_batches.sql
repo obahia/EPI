@@ -166,6 +166,9 @@ end $$;
 set local role authenticated;
 set local request.jwt.claims = '{"sub":"99999999-9999-9999-9999-999999999902","role":"authenticated"}';
 
+-- NULL as the third (errmsg) arg: pgTAP's 3-arg throws_ok(sql, errcode, X) compares X
+-- against the ACTUAL raised message, not a free-text description -- see the longer comment
+-- above the first throws_ok() in 010_tenant_isolation.sql.
 select throws_ok(
   $$ select api.create_delivery_batch(
        (select id from fixture_ids where label = 'company'),
@@ -173,6 +176,7 @@ select throws_ok(
        jsonb_build_array(jsonb_build_object('employee_id', (select id from fixture_ids where label = 'employee_1'), 'token_hash_b64', 'AAAA')),
        current_date, null) $$,
   '42501',
+  NULL,
   'tenant J cannot create a batch for tenant I''s company'
 );
 

@@ -9,7 +9,10 @@ create extension if not exists pgtap with schema extensions;
 
 begin;
 
-select plan(15);
+-- 16, not 15: the earlier count missed the one `perform is(...)` call inside a
+-- `do $$ ... end $$` block (the real-CONFIRM-with-payload assertion below), which is a
+-- real TAP assertion and counts toward the plan the same as every top-level `select`.
+select plan(16);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -105,12 +108,16 @@ end $$;
 -- path that reaches CONFIRMED without sealing (docs/mvp-roadmap.md FASE 5).
 set local role anon;
 
+-- NULL as the third (errmsg) arg throughout this file: pgTAP's 3-arg throws_ok(sql,
+-- errcode, X) compares X against the ACTUAL raised message, not a free-text description --
+-- see the longer comment above the first throws_ok() in 010_tenant_isolation.sql.
 select throws_ok(
   $$ select worker.finish_confirmation(
        (select extra from fixture_ids where label = 'cr'),
        (select extra from fixture_ids where label = 'nonce'),
        'CONFIRM', true, null, null) $$,
   '23514',
+  NULL,
   'CONFIRM without an evidence payload is rejected (evidence_payload_required)'
 );
 
@@ -204,6 +211,7 @@ set local request.jwt.claims = '{"sub":"88888888-8888-8888-8888-888888888801","r
 select throws_ok(
   $$ update evidence.evidence_versions set sealed_at = clock_timestamp() where delivery_id = (select id from fixture_ids where label = 'delivery') $$,
   '42501',
+  NULL,
   'evidence_versions has no UPDATE grant for authenticated -- fails on privilege first'
 );
 
@@ -214,6 +222,7 @@ reset role;
 select throws_ok(
   $$ update evidence.evidence_versions set sealed_at = clock_timestamp() where delivery_id = (select id from fixture_ids where label = 'delivery') $$,
   '42501',
+  NULL,
   'even the owner role cannot UPDATE evidence_versions -- the append-only trigger fires regardless of grants'
 );
 
@@ -232,6 +241,7 @@ select throws_ok(
        1, extensions.digest('x', 'sha256'), clock_timestamp()
      ) $$,
   '23514',
+  NULL,
   'a mismatched (canonical_bytes, payload_sha256) pair violates evidence_versions_payload_hash_ck'
 );
 
@@ -259,6 +269,7 @@ set local role anon;
 select throws_ok(
   $$ select worker.verify_document('ZZZZZZZZZZZZ') $$,
   'P0002',
+  NULL,
   'an unknown verification code returns a generic not_found, not a distinguishable error'
 );
 

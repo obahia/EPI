@@ -116,9 +116,13 @@ select is(
 -- DRAFT) -- attempting to re-run create_delivery's issue path on an already-ISSUED
 -- delivery must be rejected by the RPC's own status check, and even if it weren't, the
 -- trigger would still reject the illegal (ISSUED, 'ISSUE', ISSUED) tuple.
+-- NULL as the third (errmsg) arg throughout this file: pgTAP's 3-arg throws_ok(sql,
+-- errcode, X) compares X against the ACTUAL raised message, not a free-text description --
+-- see the longer comment above the first throws_ok() in 010_tenant_isolation.sql.
 select throws_ok(
   $$ select api.issue_delivery((select id from fixture_ids where label = 'delivery')) $$,
   '23514',
+  NULL,
   'issuing an already-ISSUED delivery is rejected (delivery_not_draft)'
 );
 
@@ -127,6 +131,7 @@ select throws_ok(
 select throws_ok(
   $$ update app.epi_deliveries set status = 'CANCELLED' where id = (select id from fixture_ids where label = 'delivery') $$,
   '42501',
+  NULL,
   'a direct UPDATE on epi_deliveries.status has no grant at all for authenticated'
 );
 
@@ -154,6 +159,7 @@ select is(
 select throws_ok(
   $$ select api.cancel_delivery((select id from fixture_ids where label = 'delivery2'), 'segunda tentativa') $$,
   '23514',
+  NULL,
   'CANCELLED is terminal -- a second cancel attempt is rejected (delivery_not_cancellable)'
 );
 
@@ -164,6 +170,7 @@ select throws_ok(
             2, v.id, v.name, v.ca_number, 1
      from app.epi_versions v where v.epi_id = (select id from fixture_ids where label = 'epi') and v.valid_to is null $$,
   '23514',
+  NULL,
   'cannot add a line item to an ISSUED delivery (items are DRAFT-only)'
 );
 
