@@ -163,15 +163,19 @@ select throws_ok(
   'CANCELLED is terminal -- a second cancel attempt is rejected (delivery_not_cancellable)'
 );
 
--- Items are DRAFT-only: cannot insert a new line into the already-ISSUED delivery.
+-- authenticated has no INSERT grant on app.epi_delivery_items at all (SELECT only -- see
+-- 20260831160400_epi_deliveries.sql), so a direct write is rejected at the privilege layer
+-- before any status/DRAFT-only business rule is ever reached -- same shape as the direct
+-- UPDATE on epi_deliveries.status a few tests above. Line items are only ever created
+-- inside api.create_delivery's own transaction, never by a later direct INSERT.
 select throws_ok(
   $$ insert into app.epi_delivery_items (delivery_id, company_id, line_no, epi_version_id, epi_name, ca_number, quantity)
      select (select id from fixture_ids where label = 'delivery'), (select id from fixture_ids where label = 'company'),
             2, v.id, v.name, v.ca_number, 1
      from app.epi_versions v where v.epi_id = (select id from fixture_ids where label = 'epi') and v.valid_to is null $$,
-  '23514',
+  '42501',
   NULL,
-  'cannot add a line item to an ISSUED delivery (items are DRAFT-only)'
+  'a direct INSERT into epi_delivery_items has no grant at all for authenticated'
 );
 
 select * from finish();

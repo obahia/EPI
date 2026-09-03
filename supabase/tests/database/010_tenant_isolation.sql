@@ -113,11 +113,12 @@ select throws_ok(
 
 select throws_ok(
   $$ select 1 from evidence.evidence_versions limit 1 $$,
-  '42P01',  -- undefined_table: the schema/table doesn't exist yet in FASE 0 -- this
-            -- assertion is a placeholder that will need updating to 42501 once FASE 5
-            -- creates evidence.evidence_versions, to keep proving it stays unreachable.
+  '42501',  -- FASE 5 created evidence.evidence_versions (20260831190000_evidence_schema.sql)
+            -- and it is, correctly, structurally unreachable to authenticated -- this
+            -- assertion's own comment predicted exactly this update, once that table
+            -- existed to raise permission_denied instead of undefined_table.
   NULL,
-  'evidence schema objects do not exist yet in FASE 0 (placeholder -- revisit in FASE 5)'
+  'evidence.evidence_versions exists (FASE 5) but remains unreachable to authenticated (no grant)'
 );
 
 reset role;

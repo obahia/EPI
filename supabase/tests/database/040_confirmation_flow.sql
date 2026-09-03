@@ -163,6 +163,13 @@ reset role;
 -- the 'nonce' fixture; a second call in between would silently invalidate it and fail
 -- every one of those with stale_submission, for reasons that would have nothing to do
 -- with whatever they actually test.
+-- The result is captured into a fixture and asserted via a top-level select() right after
+-- the do block, rather than `perform is(...)` inside it: pgTAP's is()/ok() print their TAP
+-- line via RAISE NOTICE when called through `perform` (their return value is otherwise
+-- discarded), and psql/pg_prove do not reliably interleave NOTICE output with the plain
+-- SELECT-result TAP lines the rest of this file emits -- in practice this desyncs the
+-- harness's test numbering ("Tests out of sequence") even when every assertion actually
+-- passed. Same pattern the very next assertion below already uses.
 do $$
 declare v_hash_b64 text; v_status text; v_nonce text;
 begin
@@ -172,9 +179,14 @@ begin
   select view_status, action_nonce into v_status, v_nonce from worker.open_link(v_hash_b64, '203.0.113.7'::inet);
   reset role;
 
-  insert into fixture_ids values ('nonce', null, v_nonce);
-  perform is(v_status, 'VIEWED', 'worker.open_link transitions SENT -> VIEWED');
+  insert into fixture_ids values ('nonce', null, v_nonce), ('open_link_status', null, v_status);
 end $$;
+
+select is(
+  (select extra from fixture_ids where label = 'open_link_status'),
+  'VIEWED',
+  'worker.open_link transitions SENT -> VIEWED'
+);
 
 select is(
   (select status::text from app.confirmation_requests where id = (select id from fixture_ids where label = 'cr')),
@@ -207,8 +219,14 @@ begin
   select result into v_result from worker.finish_confirmation(v_hash_b64, v_nonce, 'CONFIRM', false, null, null);
   reset role;
 
-  perform is(v_result, 'IDENTITY_MISMATCH', 'a wrong identity attempt returns IDENTITY_MISMATCH, not an exception');
+  insert into fixture_ids values ('wrong_identity_result', null, v_result);
 end $$;
+
+select is(
+  (select extra from fixture_ids where label = 'wrong_identity_result'),
+  'IDENTITY_MISMATCH',
+  'a wrong identity attempt returns IDENTITY_MISMATCH, not an exception'
+);
 
 select is(
   (select status::text from app.confirmation_requests where id = (select id from fixture_ids where label = 'cr')),
@@ -272,8 +290,14 @@ begin
   reset role;
 
   update fixture_ids set extra = v_nonce where label = 'nonce';
-  perform is(v_result, 'CONFIRMED', 'a correct identity attempt confirms the delivery');
+  insert into fixture_ids values ('confirm_result', null, v_result);
 end $$;
+
+select is(
+  (select extra from fixture_ids where label = 'confirm_result'),
+  'CONFIRMED',
+  'a correct identity attempt confirms the delivery'
+);
 
 select is(
   (select status::text from app.epi_deliveries where id = (select id from fixture_ids where label = 'delivery')),
@@ -328,8 +352,14 @@ begin
   select result into v_result from worker.finish_confirmation(v_hash_b64, v_nonce, 'CONTEST', null, 'NOT_RECEIVED', 'não recebi nada');
   reset role;
 
-  perform is(v_result, 'CONTESTED', 'the contest path returns CONTESTED');
+  insert into fixture_ids values ('contest_result', null, v_result);
 end $$;
+
+select is(
+  (select extra from fixture_ids where label = 'contest_result'),
+  'CONTESTED',
+  'the contest path returns CONTESTED'
+);
 
 select is(
   (select count(*)::int from app.identity_verifications where delivery_id = (select id from fixture_ids where label = 'delivery2')),

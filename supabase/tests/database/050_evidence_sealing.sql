@@ -161,9 +161,20 @@ begin
   );
   reset role;
 
-  insert into fixture_ids values ('verification_code', null, v_code);
-  perform is(v_result, 'CONFIRMED', 'confirmation with a valid evidence payload succeeds');
+  insert into fixture_ids values ('verification_code', null, v_code), ('confirm_result', null, v_result);
 end $$;
+
+-- Captured into a fixture and asserted here, top-level, rather than `perform is(...)`
+-- inside the do block above: pgTAP's is()/ok() print via RAISE NOTICE when called through
+-- `perform`, and that does not reliably interleave with this file's plain SELECT-result TAP
+-- lines -- in practice it desyncs the harness's test numbering ("Tests out of sequence")
+-- even when every assertion passed. See 040_confirmation_flow.sql for the same fix, in
+-- more detail, on four calls that had the identical problem.
+select is(
+  (select extra from fixture_ids where label = 'confirm_result'),
+  'CONFIRMED',
+  'confirmation with a valid evidence payload succeeds'
+);
 
 select ok(
   (select extra from fixture_ids where label = 'verification_code') is not null,
