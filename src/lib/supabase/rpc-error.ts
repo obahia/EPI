@@ -20,6 +20,9 @@ export function describeRpcError(error: PostgrestError, fallback: string): strin
       if (error.message?.includes("ca_already_registered")) {
         return "Já existe um EPI com este número de CA neste catálogo.";
       }
+      if (error.message?.includes("already_returned")) {
+        return "Este item já foi devolvido anteriormente.";
+      }
       return "Já existe um registro com esses dados.";
     case "23514": // check_violation (delivery_has_no_items, too_many_items via a CHECK, delivery_not_draft, delivery_not_cancellable, etc.)
       if (error.message?.includes("delivery_has_no_items")) {
@@ -27,6 +30,12 @@ export function describeRpcError(error: PostgrestError, fallback: string): strin
       }
       if (error.message?.includes("delivery_not_draft") || error.message?.includes("delivery_not_cancellable")) {
         return "Esta entrega não está mais no estado esperado para esta ação. Atualize a página.";
+      }
+      if (error.message?.includes("delivery_not_confirmed")) {
+        return "Só é possível devolver itens de uma entrega já confirmada pelo funcionário.";
+      }
+      if (error.message?.includes("note_required_for_other")) {
+        return "Descreva o motivo da devolução (mínimo 3 caracteres).";
       }
       return fallback;
     case "54000": // program_limit_exceeded -- reused for two different caps, disambiguate by message

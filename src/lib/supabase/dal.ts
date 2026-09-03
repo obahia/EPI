@@ -962,6 +962,72 @@ export const getDeliveryContests = cache(async (deliveryId: string): Promise<Del
   return (data as DeliveryContestRow[]).map(mapDeliveryContestRow);
 });
 
+export type EpiReturnReasonCode = "WORN_OUT" | "REPLACED" | "TERMINATION" | "OTHER";
+
+/** One recorded devolução (return) of a single delivery line item -- manager-recorded
+ * fact, no worker confirmation or sealed evidence (see the migration's own header comment,
+ * 20260831200900_epi_returns.sql, for why this is intentionally lighter-weight than a
+ * delivery confirmation). */
+export type EpiReturn = {
+  id: string;
+  companyId: string;
+  deliveryId: string;
+  deliveryItemId: string;
+  returnedOn: string;
+  reasonCode: EpiReturnReasonCode;
+  note: string | null;
+  createdBy: string;
+  createdAt: string;
+};
+
+type EpiReturnRow = {
+  id: string;
+  company_id: string;
+  delivery_id: string;
+  delivery_item_id: string;
+  returned_on: string;
+  reason_code: EpiReturnReasonCode;
+  note: string | null;
+  created_by: string;
+  created_at: string;
+};
+
+const EPI_RETURN_COLUMNS =
+  "id, company_id, delivery_id, delivery_item_id, returned_on, reason_code, note, created_by, created_at";
+
+function mapEpiReturnRow(row: EpiReturnRow): EpiReturn {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    deliveryId: row.delivery_id,
+    deliveryItemId: row.delivery_item_id,
+    returnedOn: row.returned_on,
+    reasonCode: row.reason_code,
+    note: row.note,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  };
+}
+
+/** Every return recorded against a known set of delivery items, in one round trip.
+ * Callers already have the item ids on hand (a delivery's own items, or one employee's
+ * items across every delivery on the ficha) -- mirrors getDeliveryItemsFor's own shape. */
+export const getReturnsForItems = cache(async (itemIds: readonly string[]): Promise<EpiReturn[]> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated || itemIds.length === 0) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .from("epi_returns")
+    .select(EPI_RETURN_COLUMNS)
+    .in("delivery_item_id", itemIds as string[]);
+
+  if (error || !data) return [];
+
+  return (data as EpiReturnRow[]).map(mapEpiReturnRow);
+});
+
 export type AuditEvent = {
   id: string;
   seq: number;

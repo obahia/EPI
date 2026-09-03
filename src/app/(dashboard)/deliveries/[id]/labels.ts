@@ -1,4 +1,10 @@
-import type { AssuranceLevel, AuditEvent, ConfirmationRequestStatus, DeliveryContest } from "@/lib/supabase/dal";
+import type {
+  AssuranceLevel,
+  AuditEvent,
+  ConfirmationRequestStatus,
+  DeliveryContest,
+  EpiReturnReasonCode,
+} from "@/lib/supabase/dal";
 import type { Dict } from "@/i18n/dictionaries";
 
 // Locale-aware labels for the manager-facing confirmation/contest/audit UI. Kept as pure
@@ -49,6 +55,15 @@ export function contestReasonLabel(t: Dict): Record<DeliveryContest["reasonCode"
     WRONG_QUANTITY: t.deliveries.contestReasonWrongQuantity,
     ALREADY_RETURNED: t.deliveries.contestReasonAlreadyReturned,
     OTHER: t.deliveries.contestReasonOther,
+  };
+}
+
+export function epiReturnReasonLabel(t: Dict): Record<EpiReturnReasonCode, string> {
+  return {
+    WORN_OUT: t.deliveries.returnReasonWornOut,
+    REPLACED: t.deliveries.returnReasonReplaced,
+    TERMINATION: t.deliveries.returnReasonTermination,
+    OTHER: t.deliveries.returnReasonOther,
   };
 }
 

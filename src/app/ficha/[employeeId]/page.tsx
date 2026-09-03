@@ -6,9 +6,11 @@ import {
   getEmployeeDeliveries,
   getDeliveryItemsFor,
   getEvidenceSummary,
+  getReturnsForItems,
   type Delivery,
   type DeliveryItem,
   type EmployeeStatus,
+  type EpiReturnReasonCode,
   type EvidenceSummary,
 } from "@/lib/supabase/dal";
 import { formatCnpj } from "@/lib/br/cnpj";
@@ -42,6 +44,13 @@ const STATUS_LABEL: Record<EmployeeStatus, string> = {
   ACTIVE: "Ativo",
   ON_LEAVE: "Afastado",
   TERMINATED: "Desligado",
+};
+
+const RETURN_REASON_LABEL: Record<EpiReturnReasonCode, string> = {
+  WORN_OUT: "desgaste",
+  REPLACED: "troca",
+  TERMINATION: "desligamento",
+  OTHER: "outro motivo",
 };
 
 export default async function FichaPage({ params }: { params: Promise<{ employeeId: string }> }) {
@@ -91,6 +100,9 @@ export default async function FichaPage({ params }: { params: Promise<{ employee
     if (summary) evidences.set(delivery.id, summary);
   });
 
+  const returns = await getReturnsForItems(items.map((item) => item.id));
+  const returnByItemId = new Map(returns.map((r) => [r.deliveryItemId, r]));
+
   const rows = mine.flatMap((delivery) =>
     (itemsByDelivery.get(delivery.id) ?? []).map((item) => ({ delivery, item })),
   );
@@ -134,35 +146,44 @@ export default async function FichaPage({ params }: { params: Promise<{ employee
             <Th className="w-[40px]">Un.</Th>
             <Th className="w-[150px]">Recebimento</Th>
             <Th className="w-[112px]">Código de verificação</Th>
+            <Th className="w-[95px]">Devolução</Th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={7} className="border border-[#111] p-4 text-center">
+              <td colSpan={8} className="border border-[#111] p-4 text-center">
                 Nenhuma entrega registrada para este empregado.
               </td>
             </tr>
           ) : (
-            rows.map(({ delivery, item }) => (
-              <tr key={item.id} className="break-inside-avoid">
-                <Td className="tabular-nums">{formatDayBr(delivery.deliveryDate)}</Td>
-                <Td>
-                  {item.epiName}
-                  {item.manufacturer || item.model ? (
-                    <span className="text-[#555]">
-                      {" — "}
-                      {[item.manufacturer, item.model].filter(Boolean).join(" ")}
-                    </span>
-                  ) : null}
-                </Td>
-                <Td className="font-mono">{item.caNumber}</Td>
-                <Td className="text-right tabular-nums">{item.quantity}</Td>
-                <Td>{UNIT_LABEL[item.unit] ?? item.unit}</Td>
-                <Td>{receiptLabel(delivery, company.timeZone)}</Td>
-                <Td className="font-mono">{evidences.get(delivery.id)?.verificationCode ?? "—"}</Td>
-              </tr>
-            ))
+            rows.map(({ delivery, item }) => {
+              const itemReturn = returnByItemId.get(item.id);
+              return (
+                <tr key={item.id} className="break-inside-avoid">
+                  <Td className="tabular-nums">{formatDayBr(delivery.deliveryDate)}</Td>
+                  <Td>
+                    {item.epiName}
+                    {item.manufacturer || item.model ? (
+                      <span className="text-[#555]">
+                        {" — "}
+                        {[item.manufacturer, item.model].filter(Boolean).join(" ")}
+                      </span>
+                    ) : null}
+                  </Td>
+                  <Td className="font-mono">{item.caNumber}</Td>
+                  <Td className="text-right tabular-nums">{item.quantity}</Td>
+                  <Td>{UNIT_LABEL[item.unit] ?? item.unit}</Td>
+                  <Td>{receiptLabel(delivery, company.timeZone)}</Td>
+                  <Td className="font-mono">{evidences.get(delivery.id)?.verificationCode ?? "—"}</Td>
+                  <Td className="tabular-nums">
+                    {itemReturn
+                      ? `${formatDayBr(itemReturn.returnedOn)} (${RETURN_REASON_LABEL[itemReturn.reasonCode]})`
+                      : "—"}
+                  </Td>
+                </tr>
+              );
+            })
           )}
         </tbody>
       </table>

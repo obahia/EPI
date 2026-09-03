@@ -208,3 +208,58 @@ export async function resolveContest(_prevState: ResolveContestState, formData: 
   revalidatePath(`/deliveries/${parsed.data.deliveryId}`);
   return { error: null };
 }
+
+export type RecordReturnState = { error: string | null };
+
+const RETURN_REASON_CODES = ["WORN_OUT", "REPLACED", "TERMINATION", "OTHER"] as const;
+
+/**
+ * Records a devolução (return) of one delivery line item via api.return_epi_item.
+ * Manager-facing only -- no worker confirmation, no sealed evidence (product decision,
+ * see the migration's own header comment). The RPC itself enforces the delivery being
+ * CONFIRMED and rejects a second return of the same item (already_returned); this action
+ * surfaces both as the ordinary error state rather than treating them as exceptional.
+ */
+export async function recordEpiReturn(
+  _prevState: RecordReturnState,
+  formData: FormData,
+): Promise<RecordReturnState> {
+  const t = getDictionary(await getLocale());
+  const schema = z.object({
+    deliveryItemId: z.uuid(),
+    deliveryId: z.uuid(),
+    returnedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, t.deliveries.invalidDate),
+    reasonCode: z.enum(RETURN_REASON_CODES),
+    note: z.string().trim().max(2000).optional(),
+  });
+
+  const parsed = schema.safeParse({
+    deliveryItemId: formData.get("deliveryItemId"),
+    deliveryId: formData.get("deliveryId"),
+    returnedOn: formData.get("returnedOn"),
+    reasonCode: formData.get("reasonCode"),
+    note: formData.get("note") || undefined,
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? t.deliveries.invalidData };
+  }
+  if (parsed.data.reasonCode === "OTHER" && (!parsed.data.note || parsed.data.note.length < 3)) {
+    return { error: t.deliveries.returnOtherNeedsNote };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.schema("api").rpc("return_epi_item", {
+    p_delivery_item_id: parsed.data.deliveryItemId,
+    p_returned_on: parsed.data.returnedOn,
+    p_reason_code: parsed.data.reasonCode,
+    p_note: parsed.data.note || null,
+  });
+
+  if (error) {
+    return { error: describeRpcError(error, t.deliveries.returnFailed) };
+  }
+
+  revalidatePath(`/deliveries/${parsed.data.deliveryId}`);
+  revalidatePath("/ficha", "layout");
+  return { error: null };
+}

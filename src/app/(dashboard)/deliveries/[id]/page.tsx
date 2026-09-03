@@ -9,6 +9,7 @@ import {
   getDeliveryAuditEvents,
   getEvidenceSummary,
   getDeliveryBatches,
+  getReturnsForItems,
 } from "@/lib/supabase/dal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -22,7 +23,8 @@ import { ConfirmationStatusPanel } from "./confirmation-status-panel";
 import { ContestPanel } from "./contest-panel";
 import { AuditTimeline } from "./audit-timeline";
 import { SealedReceipt } from "./sealed-receipt";
-import { LIVE_CONFIRMATION_STATUSES } from "./labels";
+import { ReturnItemForm } from "./return-item-form";
+import { LIVE_CONFIRMATION_STATUSES, epiReturnReasonLabel } from "./labels";
 import { formatDateTimeBr, formatDayBr } from "@/lib/format/datetime";
 
 export default async function DeliveryPage({ params }: { params: Promise<{ id: string }> }) {
@@ -57,12 +59,14 @@ export default async function DeliveryPage({ params }: { params: Promise<{ id: s
   // has no batch and simply drops that clause. company is only knowable once delivery
   // (and so delivery.companyId) has resolved, so it comes after the Promise.all above
   // rather than inside it -- fetched alongside the batch lookup, in parallel with that.
-  const [batches, company] = await Promise.all([
+  const [batches, company, returns] = await Promise.all([
     delivery.batchId ? getDeliveryBatches(delivery.companyId) : Promise.resolve([]),
     getCompany(delivery.companyId),
+    getReturnsForItems(items.map((item) => item.id)),
   ]);
   const batch = batches.find((b) => b.id === delivery.batchId) ?? null;
   const timeZone = company?.timeZone;
+  const returnByItemId = new Map(returns.map((r) => [r.deliveryItemId, r]));
 
   const hasLiveConfirmationLink = confirmationRequests[0]
     ? LIVE_CONFIRMATION_STATUSES.has(confirmationRequests[0].status)
@@ -112,19 +116,37 @@ export default async function DeliveryPage({ params }: { params: Promise<{ id: s
                     <TableHead>{t.epis.modelLabel}</TableHead>
                     <TableHead className="text-right">{t.deliveries.quantityColumnAbbr}</TableHead>
                     <TableHead>{t.deliveries.unitColumnAbbr}</TableHead>
+                    {delivery.status === "CONFIRMED" ? (
+                      <TableHead className="text-right">{t.deliveries.returnColumn}</TableHead>
+                    ) : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {items.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell className="font-bold">{item.epiName}</TableCell>
-                      <TableCell className="font-mono text-[12.5px]">{item.caNumber}</TableCell>
-                      <TableCell className="text-muted-foreground">{item.manufacturer ?? "—"}</TableCell>
-                      <TableCell className="text-muted-foreground">{item.model ?? "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{item.quantity}</TableCell>
-                      <TableCell className="text-muted-foreground">{UNIT_LABEL[item.unit] ?? item.unit}</TableCell>
-                    </TableRow>
-                  ))}
+                  {items.map((item) => {
+                    const itemReturn = returnByItemId.get(item.id);
+                    return (
+                      <TableRow key={item.id}>
+                        <TableCell className="font-bold">{item.epiName}</TableCell>
+                        <TableCell className="font-mono text-[12.5px]">{item.caNumber}</TableCell>
+                        <TableCell className="text-muted-foreground">{item.manufacturer ?? "—"}</TableCell>
+                        <TableCell className="text-muted-foreground">{item.model ?? "—"}</TableCell>
+                        <TableCell className="text-right tabular-nums">{item.quantity}</TableCell>
+                        <TableCell className="text-muted-foreground">{UNIT_LABEL[item.unit] ?? item.unit}</TableCell>
+                        {delivery.status === "CONFIRMED" ? (
+                          <TableCell className="text-right">
+                            {itemReturn ? (
+                              <span className="text-[12.5px] text-muted-foreground">
+                                {t.deliveries.returnedOnPrefix} {formatDayBr(itemReturn.returnedOn)} ·{" "}
+                                {epiReturnReasonLabel(t)[itemReturn.reasonCode]}
+                              </span>
+                            ) : (
+                              <ReturnItemForm deliveryId={delivery.id} deliveryItemId={item.id} />
+                            )}
+                          </TableCell>
+                        ) : null}
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </CardContent>
