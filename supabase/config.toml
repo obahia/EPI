@@ -232,26 +232,37 @@ otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
-# Use a production-ready SMTP server
+# Without this, Supabase's own built-in mailer sends the two emails below -- but it is
+# rate-limited to a handful an hour (see auth.rate_limit.email_sent above) and Supabase's
+# own docs say it is for testing, not production traffic. Real delivery needs a real SMTP
+# provider filled in here. Resend is the one to reach for first: a generous free tier, and
+# setup is "verify one DNS record, copy one API key" -- no deliverability tuning to do
+# yourself. Whatever you pick, put the key in .env (never here) as RESEND_API_KEY or
+# equivalent, and reference it with env(...) the way pass= does below.
+#
 # [auth.email.smtp]
 # enabled = true
-# host = "smtp.sendgrid.net"
-# port = 587
-# user = "apikey"
-# pass = "env(SENDGRID_API_KEY)"
-# admin_email = "admin@email.com"
-# sender_name = "Admin"
+# host = "smtp.resend.com"
+# port = 465
+# user = "resend"
+# pass = "env(RESEND_API_KEY)"
+# admin_email = "no-reply@yourdomain.com"  # must be on a domain you've verified with Resend
+# sender_name = "Selo"
 
-# Uncomment to customize email template
-# [auth.email.template.invite]
-# subject = "You have been invited"
-# content_path = "./supabase/templates/invite.html"
+# The only two emails this app actually sends (src/app/(auth)/login/actions.ts's signUp,
+# and forgot-password/actions.ts's resetPasswordForEmail) -- there is no invite flow, no
+# email-change notification, nothing else to template. Both point at
+# supabase/templates/*.html, branded to match the app instead of Supabase's own generic
+# default. This config.toml only governs the LOCAL dev stack (`supabase start`) -- for the
+# hosted project, paste each file's contents into Authentication > Email Templates in the
+# Supabase dashboard (there is no config-file sync for a hosted project's email templates).
+[auth.email.template.confirmation]
+subject = "Confirme seu e-mail — Selo"
+content_path = "./supabase/templates/confirmation.html"
 
-# Uncomment to customize notification email template
-# [auth.email.notification.password_changed]
-# enabled = true
-# subject = "Your password has been changed"
-# content_path = "./supabase/templates/password_changed_notification.html"
+[auth.email.template.recovery]
+subject = "Redefinir sua senha — Selo"
+content_path = "./supabase/templates/recovery.html"
 
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.
