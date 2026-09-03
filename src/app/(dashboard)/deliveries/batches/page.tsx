@@ -66,7 +66,7 @@ export default async function DeliveryBatchesPage({
               </TableHeader>
               <TableBody>
                 {batches.map((batch) => (
-                  <BatchRow key={batch.id} batch={batch} t={t} />
+                  <BatchRow key={batch.id} batch={batch} timeZone={activeCompany.timeZone} t={t} />
                 ))}
               </TableBody>
             </Table>
@@ -131,7 +131,17 @@ function HeroStat({ value, label }: { value: number; label: string }) {
   );
 }
 
-function BatchRow({ batch, t }: { batch: DeliveryBatch; t: Dict }) {
+function BatchRow({
+  batch,
+  timeZone,
+  t,
+}: {
+  batch: DeliveryBatch;
+  /** The company's own IANA zone (Company.timeZone) -- falls back to Brasília time in
+   * formatDateTimeBr when null/undefined. */
+  timeZone?: string | null;
+  t: Dict;
+}) {
   const settledPct =
     batch.totalCount > 0 ? Math.round((batch.confirmedCount / batch.totalCount) * 100) : 0;
 
@@ -141,7 +151,7 @@ function BatchRow({ batch, t }: { batch: DeliveryBatch; t: Dict }) {
         {formatDayBr(batch.deliveryDate)}
       </TableCell>
       <TableCell className="text-muted-foreground tabular-nums">
-        {formatDateTimeBr(batch.createdAt)}
+        {formatDateTimeBr(batch.createdAt, timeZone)}
       </TableCell>
       <TableCell className="text-right tabular-nums">{batch.totalCount}</TableCell>
       <TableCell className="text-right tabular-nums">{batch.confirmedCount}</TableCell>

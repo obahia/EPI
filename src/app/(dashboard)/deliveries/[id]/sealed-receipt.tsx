@@ -15,10 +15,15 @@ import { formatDateTimeBr } from "@/lib/format/datetime";
 export function SealedReceipt({
   delivery,
   evidence,
+  timeZone,
   t,
 }: {
   delivery: Delivery;
   evidence: EvidenceSummary;
+  /** The company's own IANA zone (Company.timeZone) -- falls back to Brasília time in
+   * formatDateTimeBr when null/undefined. The document that actually gets shown to a
+   * fiscal, so this is the one place that most needs to say the right hour. */
+  timeZone?: string | null;
   t: Dict;
 }) {
   return (
@@ -41,7 +46,7 @@ export function SealedReceipt({
             {delivery.employeeFullName}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {t.deliveries.sealedAtLabel}: {formatDateTimeBr(evidence.sealedAt)}
+            {t.deliveries.sealedAtLabel}: {formatDateTimeBr(evidence.sealedAt, timeZone)}
           </p>
         </div>
         <SealMark className="size-19" />

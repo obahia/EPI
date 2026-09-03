@@ -5,17 +5,21 @@ import { getDictionary } from "@/i18n/dictionaries";
 import { actorKindLabel, auditEventLabel } from "./labels";
 import { formatDateTimeBr } from "@/lib/format/datetime";
 
-function fmt(value: string): string {
-  return formatDateTimeBr(value);
-}
-
 /** Simple vertical timeline answering "o que aconteceu com esta entrega" -- not exhaustive
  * UI, just a glance-friendly feed of the delivery's own events plus every confirmation_request
  * it has had (getDeliveryAuditEvents already merges those server-side).
  *
  * Drawn as the mockup draws it: no rail, just a dot per event, terracotta on the newest one
  * so the eye lands on what happened last. */
-export async function AuditTimeline({ events }: { events: AuditEvent[] }) {
+export async function AuditTimeline({
+  events,
+  timeZone,
+}: {
+  events: AuditEvent[];
+  /** The company's own IANA zone (Company.timeZone) -- falls back to Brasília time in
+   * formatDateTimeBr when null/undefined. */
+  timeZone?: string | null;
+}) {
   if (events.length === 0) {
     return null;
   }
@@ -35,7 +39,7 @@ export async function AuditTimeline({ events }: { events: AuditEvent[] }) {
             <div className="min-w-0">
               <p className="text-[14px] font-bold">{auditEventLabel(t, event.eventType)}</p>
               <p className="text-[12.5px] text-muted-foreground">
-                {fmt(event.createdAt)} · {actorLabel[event.actorKind]}
+                {formatDateTimeBr(event.createdAt, timeZone)} · {actorLabel[event.actorKind]}
               </p>
             </div>
           </li>

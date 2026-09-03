@@ -21,7 +21,18 @@ const initialState: ConfirmationLinkState = { error: null, path: null, expiresAt
  * the URL itself, the two ways of getting it to the worker, and the QR to hold up to
  * their phone when they are standing right there.
  */
-export function ConfirmationLinkPanel({ deliveryId, hasLiveLink }: { deliveryId: string; hasLiveLink: boolean }) {
+export function ConfirmationLinkPanel({
+  deliveryId,
+  hasLiveLink,
+  timeZone,
+}: {
+  deliveryId: string;
+  hasLiveLink: boolean;
+  /** The company's own IANA zone (Company.timeZone) -- falls back to Brasília time in
+   * formatDateTimeBr when null/undefined. A plain server-passed prop: formatDateTimeBr has
+   * no browser-only dependency, so this needs no client-side fetch of its own. */
+  timeZone?: string | null;
+}) {
   const t = useT();
   const [state, formAction, pending] = useActionState(createConfirmationLink, initialState);
   // Lazy initializer runs synchronously during render (both the server's no-op pass, where
@@ -106,7 +117,7 @@ export function ConfirmationLinkPanel({ deliveryId, hasLiveLink }: { deliveryId:
               {state.expiresAt ? (
                 <>
                   {" "}
-                  {t.deliveries.expiresAtPrefix} {formatDateTimeBr(state.expiresAt)}.
+                  {t.deliveries.expiresAtPrefix} {formatDateTimeBr(state.expiresAt, timeZone)}.
                 </>
               ) : null}
             </p>

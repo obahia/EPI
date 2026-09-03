@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import {
   verifySession,
+  getCompany,
   getDelivery,
   getDeliveryItems,
   getConfirmationRequests,
@@ -53,9 +54,15 @@ export default async function DeliveryPage({ params }: { params: Promise<{ id: s
   }
 
   // The mockup's subtitle names the batch the delivery came out of; a one-off delivery
-  // has no batch and simply drops that clause.
-  const batches = delivery.batchId ? await getDeliveryBatches(delivery.companyId) : [];
+  // has no batch and simply drops that clause. company is only knowable once delivery
+  // (and so delivery.companyId) has resolved, so it comes after the Promise.all above
+  // rather than inside it -- fetched alongside the batch lookup, in parallel with that.
+  const [batches, company] = await Promise.all([
+    delivery.batchId ? getDeliveryBatches(delivery.companyId) : Promise.resolve([]),
+    getCompany(delivery.companyId),
+  ]);
   const batch = batches.find((b) => b.id === delivery.batchId) ?? null;
+  const timeZone = company?.timeZone;
 
   const hasLiveConfirmationLink = confirmationRequests[0]
     ? LIVE_CONFIRMATION_STATUSES.has(confirmationRequests[0].status)
@@ -66,7 +73,7 @@ export default async function DeliveryPage({ params }: { params: Promise<{ id: s
     batch
       ? `${t.deliveries.batchColumn.toLowerCase()} ${formatDayBr(batch.deliveryDate)}${batch.note?.trim() ? ` ${batch.note.trim()}` : ""}`
       : null,
-    delivery.issuedAt ? `${t.deliveries.issuedOn} ${formatDateTimeBr(delivery.issuedAt)}` : null,
+    delivery.issuedAt ? `${t.deliveries.issuedOn} ${formatDateTimeBr(delivery.issuedAt, timeZone)}` : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -82,7 +89,7 @@ export default async function DeliveryPage({ params }: { params: Promise<{ id: s
       />
 
       {delivery.status === "CONFIRMED" && evidence ? (
-        <SealedReceipt delivery={delivery} evidence={evidence} t={t} />
+        <SealedReceipt delivery={delivery} evidence={evidence} timeZone={timeZone} t={t} />
       ) : null}
 
       {/* Two columns from `xl` up, as the mockup lays screen 4d out: the record (what was
@@ -145,17 +152,21 @@ export default async function DeliveryPage({ params }: { params: Promise<{ id: s
             </Card>
           ) : null}
 
-          <ContestPanel deliveryId={delivery.id} contests={contests} />
+          <ContestPanel deliveryId={delivery.id} contests={contests} timeZone={timeZone} />
 
-          <AuditTimeline events={auditEvents} />
+          <AuditTimeline events={auditEvents} timeZone={timeZone} />
         </div>
 
         <div className="flex flex-col gap-4 xl:sticky xl:top-7.5 xl:w-84 xl:shrink-0">
           {delivery.status === "ISSUED" || delivery.status === "CONTESTED" ? (
-            <ConfirmationLinkPanel deliveryId={delivery.id} hasLiveLink={hasLiveConfirmationLink} />
+            <ConfirmationLinkPanel
+              deliveryId={delivery.id}
+              hasLiveLink={hasLiveConfirmationLink}
+              timeZone={timeZone}
+            />
           ) : null}
 
-          <ConfirmationStatusPanel requests={confirmationRequests} />
+          <ConfirmationStatusPanel requests={confirmationRequests} timeZone={timeZone} />
         </div>
       </div>
     </main>

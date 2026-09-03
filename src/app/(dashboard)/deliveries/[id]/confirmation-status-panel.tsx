@@ -5,10 +5,6 @@ import { getDictionary } from "@/i18n/dictionaries";
 import { assuranceLevelLabel, confirmationStatusLabel } from "./labels";
 import { formatDateTimeBr } from "@/lib/format/datetime";
 
-function fmt(value: string): string {
-  return formatDateTimeBr(value);
-}
-
 /**
  * Most recent confirmation_request for a delivery, plus a collapsed list of any earlier ones
  * (a resend creates a new row rather than mutating the old one -- see dal.ts's comment on
@@ -18,12 +14,21 @@ function fmt(value: string): string {
  * worker has to clear leads in plain words, the attempts left under it, and the timestamps
  * follow as a quiet label/value list.
  */
-export async function ConfirmationStatusPanel({ requests }: { requests: ConfirmationRequest[] }) {
+export async function ConfirmationStatusPanel({
+  requests,
+  timeZone,
+}: {
+  requests: ConfirmationRequest[];
+  /** The company's own IANA zone (Company.timeZone) -- falls back to Brasília time in
+   * formatDateTimeBr when null/undefined. */
+  timeZone?: string | null;
+}) {
   const current = requests[0];
   if (!current) {
     return null;
   }
   const previous = requests.slice(1);
+  const fmt = (value: string) => formatDateTimeBr(value, timeZone);
 
   const t = getDictionary(await getLocale());
   const statusLabel = confirmationStatusLabel(t);

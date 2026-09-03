@@ -6,16 +6,23 @@ import { contestReasonLabel } from "./labels";
 import { ResolveContestForm } from "./resolve-contest-form";
 import { formatDateTimeBr } from "@/lib/format/datetime";
 
-function fmt(value: string): string {
-  return formatDateTimeBr(value);
-}
-
 /** Only rendered when the delivery has at least one contest. Unresolved contests get an
  * inline answer form (resolveContest); resolved ones just show what was already written. */
-export async function ContestPanel({ deliveryId, contests }: { deliveryId: string; contests: DeliveryContest[] }) {
+export async function ContestPanel({
+  deliveryId,
+  contests,
+  timeZone,
+}: {
+  deliveryId: string;
+  contests: DeliveryContest[];
+  /** The company's own IANA zone (Company.timeZone) -- falls back to Brasília time in
+   * formatDateTimeBr when null/undefined. */
+  timeZone?: string | null;
+}) {
   if (contests.length === 0) {
     return null;
   }
+  const fmt = (value: string) => formatDateTimeBr(value, timeZone);
 
   const t = getDictionary(await getLocale());
   const reasonLabel = contestReasonLabel(t);

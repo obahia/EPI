@@ -1,12 +1,16 @@
 import { createWorkerClient } from "@/lib/supabase/worker-client";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatDateTimeBr } from "@/lib/format/datetime";
+import { formatDateTimeBr, timeZoneLabel } from "@/lib/format/datetime";
 
 type VerifyResultRow = {
   verification_code: string;
   status: string;
   company_name: string;
+  /** The sealing company's own IANA zone (worker.verify_document, DAT-01 follow-up) --
+   * this page has no session and so no other way to know it; falls back to Brasília time
+   * in formatDateTimeBr/timeZoneLabel if a row somehow comes back without one. */
+  company_time_zone: string | null;
   sealed_at: string;
   hash_prefix: string;
 };
@@ -48,7 +52,11 @@ export default async function VerifyPage({ params }: { params: Promise<{ code: s
               </div>
               <div>
                 <dt className="text-xs text-muted-foreground">Selado em</dt>
-                <dd>{formatDateTimeBr(result.sealed_at)}</dd>
+                <dd>
+                  {formatDateTimeBr(result.sealed_at, result.company_time_zone)}
+                  {" · "}
+                  {timeZoneLabel(result.company_time_zone)}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs text-muted-foreground">Início do hash</dt>
