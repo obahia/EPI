@@ -144,21 +144,23 @@ export default async function FichaPage({ params }: { params: Promise<{ employee
             <Th className="w-[64px]">CA</Th>
             <Th className="w-[38px] text-right">Qtd.</Th>
             <Th className="w-[40px]">Un.</Th>
-            <Th className="w-[150px]">Recebimento</Th>
-            <Th className="w-[112px]">Código de verificação</Th>
+            <Th className="w-[130px]">Recebimento</Th>
+            <Th className="w-[100px]">Código de verificação</Th>
+            <Th className="w-[80px]">Assinatura</Th>
             <Th className="w-[95px]">Devolução</Th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={8} className="border border-[#111] p-4 text-center">
+              <td colSpan={9} className="border border-[#111] p-4 text-center">
                 Nenhuma entrega registrada para este empregado.
               </td>
             </tr>
           ) : (
             rows.map(({ delivery, item }) => {
               const itemReturn = returnByItemId.get(item.id);
+              const signatureSrc = signatureImageSrc(evidences.get(delivery.id)?.payload);
               return (
                 <tr key={item.id} className="break-inside-avoid">
                   <Td className="tabular-nums">{formatDayBr(delivery.deliveryDate)}</Td>
@@ -176,6 +178,14 @@ export default async function FichaPage({ params }: { params: Promise<{ employee
                   <Td>{UNIT_LABEL[item.unit] ?? item.unit}</Td>
                   <Td>{receiptLabel(delivery, company.timeZone)}</Td>
                   <Td className="font-mono">{evidences.get(delivery.id)?.verificationCode ?? "—"}</Td>
+                  <Td>
+                    {signatureSrc ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- plain <img> throughout this codebase, see confirmation-link-panel.tsx / receipt-view.tsx
+                      <img src={signatureSrc} alt="Assinatura do funcionário" className="h-5 w-auto object-contain" />
+                    ) : (
+                      "—"
+                    )}
+                  </Td>
                   <Td className="tabular-nums">
                     {itemReturn
                       ? `${formatDayBr(itemReturn.returnedOn)} (${RETURN_REASON_LABEL[itemReturn.reasonCode]})`
@@ -195,7 +205,9 @@ export default async function FichaPage({ params }: { params: Promise<{ employee
           assinatura eletrônica simples nos termos do art. 4º, I, da Lei nº 14.063/2020. Cada
           entrega confirmada possui comprovante selado com código de verificação próprio,
           conferível publicamente, sem necessidade de acesso ao sistema, em{" "}
-          <strong>/verify/&lt;código&gt;</strong>.
+          <strong>/verify/&lt;código&gt;</strong>. Quando presente, a coluna &ldquo;Assinatura&rdquo;
+          exibe a assinatura manuscrita coletada na tela do celular no momento da confirmação,
+          incluída no mesmo comprovante selado.
         </p>
         <p className="mt-2">
           Todos os horários referem-se ao {timeZoneLabel(company.timeZone)}. Documento gerado em{" "}
@@ -208,6 +220,19 @@ export default async function FichaPage({ params }: { params: Promise<{ employee
       </section>
     </main>
   );
+}
+
+/** Extracts the worker's captured signature (src/lib/evidence/signature.ts) from an
+ * evidence payload for print rendering. Older confirmations sealed before this field
+ * existed won't have one -- rendered as "—" by the caller, same as a missing verification
+ * code. `payload` is untyped (Record<string, unknown>) because it's opaque at the DB layer;
+ * this is the one place its `signature` key gets read back out. */
+function signatureImageSrc(payload: Record<string, unknown> | undefined): string | null {
+  const signature = payload?.signature;
+  if (!signature || typeof signature !== "object") return null;
+  const { format, data } = signature as { format?: unknown; data?: unknown };
+  if (typeof format !== "string" || typeof data !== "string" || !data) return null;
+  return `data:${format};base64,${data}`;
 }
 
 /** How this delivery's receipt was signed -- the column that replaces the handwritten

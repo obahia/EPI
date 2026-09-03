@@ -10,6 +10,7 @@ import { getIdentityProvider } from "@/lib/identity/registry";
 import type { AssuranceLevel } from "@/lib/identity/provider";
 import { canonicalizeEvidencePayload, formatTimestampUtc } from "@/lib/evidence/canon";
 import { buildEvidencePayload, type EvidenceSource } from "@/lib/evidence/payload";
+import { parseSignatureDataUrl } from "@/lib/evidence/signature";
 
 /**
  * The worker path's ONLY mutating actions. The raw token is read from the HttpOnly cookie
@@ -34,9 +35,21 @@ export async function submitConfirm(_prevState: ConfirmState, formData: FormData
   const nonce = formData.get("nonce");
   const requiredLevel = formData.get("requiredAssuranceLevel");
   const cpfLast3 = formData.get("cpfLast3");
+  const signatureRaw = formData.get("signature");
 
   if (typeof viewId !== "string" || typeof nonce !== "string" || typeof requiredLevel !== "string") {
     return { error: "Dados inválidos. Atualize a página.", attemptsRemaining: null };
+  }
+
+  // Checked before spending an identity attempt (begin_confirmation below) -- a missing
+  // signature is a client-side mistake, not a wrong-CPF guess, and shouldn't burn one of the
+  // worker's limited attempts.
+  if (typeof signatureRaw !== "string" || !signatureRaw) {
+    return { error: "Assine antes de confirmar.", attemptsRemaining: null };
+  }
+  const signature = parseSignatureDataUrl(signatureRaw);
+  if (!signature) {
+    return { error: "Assinatura inválida. Limpe e assine novamente.", attemptsRemaining: null };
   }
 
   const tokenHashB64 = hashWorkerToken(token).toString("base64");
@@ -109,6 +122,7 @@ export async function submitConfirm(_prevState: ConfirmState, formData: FormData
       method: identityMethod!,
       achievedAssuranceLevel: requiredAssuranceLevel,
       confirmedAtUtc,
+      signature,
     });
     const { canonicalBytes, sha256 } = canonicalizeEvidencePayload(payload);
 

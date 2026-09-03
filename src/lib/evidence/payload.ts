@@ -1,6 +1,7 @@
 import "server-only";
 import { EPI_CANON_VERSION } from "./canon";
 import type { AssuranceLevel, IdentityCheckMethod } from "@/lib/identity/provider";
+import type { EvidenceSignature } from "./signature";
 
 export type EvidenceSourceItem = {
   line_no: number;
@@ -28,6 +29,11 @@ export type EvidenceSource = {
  * server-side via worker.get_evidence_source -- NEVER from client-submitted form fields,
  * which a tampered request could forge into fabricated evidence. Absent values (note,
  * manufacturer, model) are OMITTED as keys, never set to `null` -- see canon.ts rule 3.
+ *
+ * `signature` is the one deliberate exception to "never client-submitted": a drawn signature
+ * can only ever come from the worker's own browser. It's validated (PNG magic bytes + size
+ * cap) at the trust boundary in src/lib/evidence/signature.ts before it ever reaches here --
+ * this function just places the already-validated shape into the payload.
  */
 export function buildEvidencePayload(params: {
   source: EvidenceSource;
@@ -35,8 +41,9 @@ export function buildEvidencePayload(params: {
   method: IdentityCheckMethod;
   achievedAssuranceLevel: AssuranceLevel;
   confirmedAtUtc: string;
+  signature: EvidenceSignature;
 }): Record<string, unknown> {
-  const { source, confirmationRequestId, method, achievedAssuranceLevel, confirmedAtUtc } = params;
+  const { source, confirmationRequestId, method, achievedAssuranceLevel, confirmedAtUtc, signature } = params;
 
   const items = source.items.map((item) => {
     const out: Record<string, unknown> = {
@@ -65,6 +72,7 @@ export function buildEvidencePayload(params: {
     declaration_text: `Eu, ${source.employee_full_name}, declaro que recebi os equipamentos de proteção individual (EPI) listados neste documento, entregues por ${source.company_legal_name}.`,
     identity: { method, achieved_assurance_level: achievedAssuranceLevel },
     confirmed_at_utc: confirmedAtUtc,
+    signature,
   };
   if (source.note) payload.note = source.note;
 

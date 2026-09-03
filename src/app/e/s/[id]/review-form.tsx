@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { submitConfirm, submitContest, type ConfirmState, type ContestState } from "./actions";
 import { formatDayBr } from "@/lib/format/datetime";
+import { SignaturePad } from "./signature-pad";
 
 type Item = { epi_name: string; ca_number: string; manufacturer: string | null; model: string | null; quantity: number; unit: string };
 
@@ -66,6 +67,7 @@ export function ReviewForm({
   const [confirmState, confirmAction, confirmPending] = useActionState(submitConfirm, confirmInitialState);
   const [contestState, contestAction, contestPending] = useActionState(submitContest, contestInitialState);
   const [contestOpen, setContestOpen] = useState(false);
+  const [hasSignature, setHasSignature] = useState(false);
   const idPrefix = useId();
   const remaining = Math.max(0, identityMaxAttempts - identityAttempts);
 
@@ -129,9 +131,14 @@ export function ReviewForm({
           </div>
         ) : null}
 
+        <div className="flex flex-col gap-2">
+          <Label>Assinatura</Label>
+          <SignaturePad onSignedChange={setHasSignature} />
+        </div>
+
         {confirmState.error ? <p className="text-sm text-destructive">{confirmState.error}</p> : null}
 
-        <Button type="submit" size="lg" disabled={confirmPending}>
+        <Button type="submit" size="lg" disabled={confirmPending || !hasSignature}>
           {confirmPending ? "Confirmando…" : "Confirmar recebimento"}
         </Button>
       </form>
