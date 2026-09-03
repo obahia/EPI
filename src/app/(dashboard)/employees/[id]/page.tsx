@@ -1,10 +1,20 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { verifySession, getEmployee, getEmployeeDeliveries, type EmployeeStatus } from "@/lib/supabase/dal";
+import {
+  verifySession,
+  getEmployee,
+  getEmployeeDeliveries,
+  getJobPositions,
+  getLocations,
+  getEmployeeEpiLifecycle,
+  type EmployeeStatus,
+  type EmployeeEpiLifecycle,
+} from "@/lib/supabase/dal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
 import { Panel, PanelKicker, PanelTitle } from "@/components/panel";
+import { EpiLifecycleBadge } from "@/components/epi-lifecycle-badge";
 import { formatPhoneBr } from "@/lib/br/phone";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary, type Dict } from "@/i18n/dictionaries";
@@ -33,7 +43,12 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
     notFound();
   }
 
-  const mine = await getEmployeeDeliveries(employee.id);
+  const [mine, positions, locations, lifecycle] = await Promise.all([
+    getEmployeeDeliveries(employee.id),
+    getJobPositions(employee.companyId),
+    getLocations(employee.companyId),
+    getEmployeeEpiLifecycle(employee.id),
+  ]);
   const awaiting = mine.filter((d) => d.status === "ISSUED").length;
 
   return (
@@ -69,7 +84,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
         <Panel className="min-w-0 flex-1">
           <PanelTitle>{t.employees.editEmployee}</PanelTitle>
           <div className="mt-4.5">
-            <EmployeeEditForm employee={employee} />
+            <EmployeeEditForm employee={employee} positions={positions} locations={locations} />
           </div>
         </Panel>
 
@@ -110,6 +125,34 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
           </Panel>
         </div>
       </div>
+
+      <Panel className="flex flex-col gap-4">
+        <PanelTitle>{t.employees.lifecycleTitle}</PanelTitle>
+        {lifecycle.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t.employees.lifecycleEmpty}</p>
+        ) : (
+          <ul className="flex flex-col gap-3.5">
+            {lifecycle.map((item) => (
+              <li
+                key={item.deliveryItemId}
+                className="flex flex-wrap items-center justify-between gap-3 border-b border-border/45 pb-3.5 last:border-b-0 last:pb-0"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-[14px] font-bold">
+                    {item.epiName}
+                    {item.variantLabel ? ` · ${item.variantLabel}` : ""}
+                  </p>
+                  <p className="truncate text-[12px] text-muted-foreground">
+                    {t.epis.caLabel} {item.caNumber}
+                    {lifecycleDueLabel(t, item) ? ` · ${lifecycleDueLabel(t, item)}` : ""}
+                  </p>
+                </div>
+                <EpiLifecycleBadge status={item.status} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
     </main>
   );
 }
@@ -121,4 +164,14 @@ function Fact({ label, value }: { label: string; value: string }) {
       <dd className="min-w-0 truncate text-right font-bold">{value}</dd>
     </div>
   );
+}
+
+/** pt: "vence em 12 dias" / "venceu há 5 dias" -- null for an item with no tracked lifespan
+ * at all (dueDate/daysRemaining both null, same VIGENTE-by-default rule the RPC itself
+ * documents on app.epi_lifecycle_status). */
+function lifecycleDueLabel(t: Dict, item: EmployeeEpiLifecycle): string | null {
+  if (item.dueDate == null || item.daysRemaining == null) return null;
+  return item.daysRemaining >= 0
+    ? `${t.employees.lifecycleDueInPrefix} ${item.daysRemaining} ${t.employees.lifecycleDaysUnit}`
+    : `${t.employees.lifecycleOverduePrefix} ${Math.abs(item.daysRemaining)} ${t.employees.lifecycleDaysUnit}`;
 }

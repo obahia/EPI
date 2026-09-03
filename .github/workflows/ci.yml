@@ -77,10 +77,18 @@ jobs:
           retention-days: 14
 
   database:
-    name: Database (migrations from zero + pgTAP tenant isolation suite)
+    name: Database (migrations from zero + pgTAP suite + real concurrency)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
 
       - uses: supabase/setup-cli@v1
         with:
@@ -92,8 +100,18 @@ jobs:
       - name: Apply every migration from a clean database + seed
         run: supabase db reset
 
-      - name: Run pgTAP suite (schema invariants + tenant isolation)
+      - name: Run pgTAP suite (every file under supabase/tests/database -- schema invariants, tenant isolation, and the full A+B+C expansion suite)
         run: supabase test db
+
+      # A+B+C closure-audit Blocker 2: PGlite (used elsewhere for fast local checks) is a
+      # single in-process connection and cannot represent real concurrency -- this runs the
+      # last-stock-unit race and the concurrent-replacement race against the real ephemeral
+      # Postgres this job already started, using two genuinely independent client
+      # connections (see scripts/concurrency-test.mjs for the full rationale).
+      - name: Real-concurrency tests (two independent Postgres connections)
+        run: node scripts/concurrency-test.mjs
+        env:
+          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
 
       - name: Stop local Supabase stack
         if: always()

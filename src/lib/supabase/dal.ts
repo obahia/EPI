@@ -196,6 +196,14 @@ export type Employee = {
   externalRef: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Optional FK into app.job_positions -- the structured cargo, if this employee has been
+   * mapped to the catalog. Null means positionTitle (free text) is the display fallback. */
+  positionId: string | null;
+  /** Optional FK into app.locations -- the site/unit this employee is assigned to, and the
+   * bucket api.issue_delivery/api.return_epi_item consume from/credit to (see
+   * 20260903130000_stock_location_transfer_gate_fixes.sql). Null means unassigned; stock
+   * movements for this employee then use the company-wide bucket. */
+  locationId: string | null;
 };
 
 type EmployeeRow = {
@@ -216,10 +224,12 @@ type EmployeeRow = {
   external_ref: string | null;
   created_at: string;
   updated_at: string;
+  position_id: string | null;
+  location_id: string | null;
 };
 
 const EMPLOYEE_COLUMNS =
-  "id, organization_id, company_id, full_name, cpf_masked, registration_number, phone_e164, email, position_title, department, status, terminated_on, data_origin, external_source, external_ref, created_at, updated_at";
+  "id, organization_id, company_id, full_name, cpf_masked, registration_number, phone_e164, email, position_title, department, status, terminated_on, data_origin, external_source, external_ref, created_at, updated_at, position_id, location_id";
 
 function mapEmployeeRow(row: EmployeeRow): Employee {
   return {
@@ -240,6 +250,8 @@ function mapEmployeeRow(row: EmployeeRow): Employee {
     externalRef: row.external_ref,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    positionId: row.position_id,
+    locationId: row.location_id,
   };
 }
 
@@ -298,6 +310,14 @@ export type Epi = {
   description: string | null;
   defaultUnit: EpiUnit;
   versionValidFrom: string;
+  /** Whether a "troca" (api.create_replacement_delivery) of this EPI must be followed by a
+   * devolução -- api.pending_returns surfaces the open pendency when one never arrives. */
+  requiresReturnOnReplacement: boolean;
+  /** Vida útil padrão in days, or null when this EPI has no tracked expiry -- its lifecycle
+   * status is then always VIGENTE (see EpiLifecycleStatus). Versioned like name/ca_number:
+   * an existing delivery item keeps whatever value it snapshotted at delivery time
+   * (DeliveryItem.lifespanDays), immune to a later catalog edit. */
+  defaultLifespanDays: number | null;
 };
 
 type EpiRow = {
@@ -316,10 +336,12 @@ type EpiRow = {
   description: string | null;
   default_unit: EpiUnit;
   version_valid_from: string;
+  requires_return_on_replacement: boolean;
+  default_lifespan_days: number | null;
 };
 
 const EPI_COLUMNS =
-  "id, organization_id, company_id, is_active, archived_at, created_at, current_version_id, version, name, ca_number, manufacturer, model, description, default_unit, version_valid_from";
+  "id, organization_id, company_id, is_active, archived_at, created_at, current_version_id, version, name, ca_number, manufacturer, model, description, default_unit, version_valid_from, requires_return_on_replacement, default_lifespan_days";
 
 function mapEpiRow(row: EpiRow): Epi {
   return {
@@ -338,6 +360,8 @@ function mapEpiRow(row: EpiRow): Epi {
     description: row.description,
     defaultUnit: row.default_unit,
     versionValidFrom: row.version_valid_from,
+    requiresReturnOnReplacement: row.requires_return_on_replacement,
+    defaultLifespanDays: row.default_lifespan_days,
   };
 }
 
@@ -379,7 +403,216 @@ export const getEpi = cache(async (epiId: string): Promise<Epi | null> => {
   return mapEpiRow(data as EpiRow);
 });
 
+export type JobPositionStatus = "ACTIVE" | "INACTIVE";
+
+export type JobPosition = {
+  id: string;
+  organizationId: string;
+  companyId: string | null; // null = org-wide shared catalog entry, same convention as Epi
+  title: string;
+  description: string | null;
+  status: JobPositionStatus;
+  createdAt: string;
+};
+
+type JobPositionRow = {
+  id: string;
+  organization_id: string;
+  company_id: string | null;
+  title: string;
+  description: string | null;
+  status: JobPositionStatus;
+  created_at: string;
+};
+
+const JOB_POSITION_COLUMNS = "id, organization_id, company_id, title, description, status, created_at";
+
+function mapJobPositionRow(row: JobPositionRow): JobPosition {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    companyId: row.company_id,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
+/** Job positions ("cargos") visible for one company, via api.job_positions: the org-wide
+ * shared catalog (company_id IS NULL) plus that company's own entries -- same visibility
+ * rule as getEpis. */
+export const getJobPositions = cache(async (companyId: string): Promise<JobPosition[]> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .from("job_positions")
+    .select(JOB_POSITION_COLUMNS)
+    .or(`company_id.is.null,company_id.eq.${companyId}`)
+    .order("title", { ascending: true });
+
+  if (error || !data) return [];
+
+  return (data as JobPositionRow[]).map(mapJobPositionRow);
+});
+
+/** A single job position by id, or null if it doesn't exist or isn't visible (RLS). */
+export const getJobPosition = cache(async (positionId: string): Promise<JobPosition | null> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return null;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .from("job_positions")
+    .select(JOB_POSITION_COLUMNS)
+    .eq("id", positionId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  return mapJobPositionRow(data as JobPositionRow);
+});
+
+export type PositionEpiRequirement = {
+  id: string;
+  organizationId: string;
+  companyId: string | null;
+  positionId: string;
+  epiId: string;
+  required: boolean;
+  quantity: number;
+  periodicityDays: number | null;
+  substitutionNotes: string | null;
+  createdAt: string;
+  epiName: string;
+  caNumber: string;
+};
+
+type PositionEpiRequirementRow = {
+  id: string;
+  organization_id: string;
+  company_id: string | null;
+  position_id: string;
+  epi_id: string;
+  required: boolean;
+  quantity: number;
+  periodicity_days: number | null;
+  substitution_notes: string | null;
+  created_at: string;
+  epi_name: string;
+  ca_number: string;
+};
+
+const POSITION_EPI_REQUIREMENT_COLUMNS =
+  "id, organization_id, company_id, position_id, epi_id, required, quantity, periodicity_days, substitution_notes, created_at, epi_name, ca_number";
+
+function mapPositionEpiRequirementRow(row: PositionEpiRequirementRow): PositionEpiRequirement {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    companyId: row.company_id,
+    positionId: row.position_id,
+    epiId: row.epi_id,
+    required: row.required,
+    quantity: row.quantity,
+    periodicityDays: row.periodicity_days,
+    substitutionNotes: row.substitution_notes,
+    createdAt: row.created_at,
+    epiName: row.epi_name,
+    caNumber: row.ca_number,
+  };
+}
+
+/** The matriz cargo x EPI for one position, via api.position_epi_requirements (RLS-scoped),
+ * joined to each epi's current catalog version for display. */
+export const getPositionMatrix = cache(async (positionId: string): Promise<PositionEpiRequirement[]> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .from("position_epi_requirements")
+    .select(POSITION_EPI_REQUIREMENT_COLUMNS)
+    .eq("position_id", positionId);
+
+  if (error || !data) return [];
+
+  return (data as PositionEpiRequirementRow[]).map(mapPositionEpiRequirementRow);
+});
+
+export type EpiVariant = {
+  id: string;
+  organizationId: string;
+  epiId: string;
+  label: string;
+  sku: string | null;
+  attributes: Record<string, unknown>;
+  isActive: boolean;
+  createdAt: string;
+};
+
+type EpiVariantRow = {
+  id: string;
+  organization_id: string;
+  epi_id: string;
+  label: string;
+  sku: string | null;
+  attributes: Record<string, unknown>;
+  is_active: boolean;
+  created_at: string;
+};
+
+const EPI_VARIANT_COLUMNS = "id, organization_id, epi_id, label, sku, attributes, is_active, created_at";
+
+function mapEpiVariantRow(row: EpiVariantRow): EpiVariant {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    epiId: row.epi_id,
+    label: row.label,
+    sku: row.sku,
+    attributes: row.attributes,
+    isActive: row.is_active,
+    createdAt: row.created_at,
+  };
+}
+
+/** The size/SKU variants of one EPI catalog entry, via api.epi_variants (RLS-scoped, same
+ * visibility as the parent epi itself). */
+export const getEpiVariants = cache(async (epiId: string): Promise<EpiVariant[]> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .from("epi_variants")
+    .select(EPI_VARIANT_COLUMNS)
+    .eq("epi_id", epiId)
+    .order("label", { ascending: true });
+
+  if (error || !data) return [];
+
+  return (data as EpiVariantRow[]).map(mapEpiVariantRow);
+});
+
 export type DeliveryStatus = "DRAFT" | "ISSUED" | "CONFIRMED" | "CONTESTED" | "CANCELLED" | "SUPERSEDED";
+
+export type DeliveryReasonCode =
+  | "FIRST_ISSUE"
+  | "PERIODIC_REPLACEMENT"
+  | "WEAR"
+  | "DAMAGE"
+  | "LOSS"
+  | "SIZE_CHANGE"
+  | "ROLE_CHANGE"
+  | "EXPIRATION"
+  | "OTHER";
 
 export type Delivery = {
   id: string;
@@ -405,6 +638,10 @@ export type Delivery = {
   employeeFullName: string;
   /** The batch this delivery was issued in, or null when it was created one-off. */
   batchId: string | null;
+  /** Why this delivery happened (spec: primeira entrega/substituição periódica/desgaste/
+   * dano/perda/troca de tamanho/troca de função/vencimento/outro). */
+  reasonCode: DeliveryReasonCode;
+  reasonNote: string | null;
 };
 
 type DeliveryRow = {
@@ -430,10 +667,12 @@ type DeliveryRow = {
   updated_at: string;
   employee_full_name: string;
   batch_id: string | null;
+  reason_code: DeliveryReasonCode;
+  reason_note: string | null;
 };
 
 const DELIVERY_COLUMNS =
-  "id, organization_id, company_id, employee_id, chain_id, chain_version, corrects_delivery_id, superseded_by_delivery_id, status, delivery_date, note, issued_at, frozen_at, confirmed_at, contested_at, cancelled_at, cancel_reason, created_by, created_at, updated_at, employee_full_name, batch_id";
+  "id, organization_id, company_id, employee_id, chain_id, chain_version, corrects_delivery_id, superseded_by_delivery_id, status, delivery_date, note, issued_at, frozen_at, confirmed_at, contested_at, cancelled_at, cancel_reason, created_by, created_at, updated_at, employee_full_name, batch_id, reason_code, reason_note";
 
 function mapDeliveryRow(row: DeliveryRow): Delivery {
   return {
@@ -459,6 +698,8 @@ function mapDeliveryRow(row: DeliveryRow): Delivery {
     updatedAt: row.updated_at,
     employeeFullName: row.employee_full_name,
     batchId: row.batch_id,
+    reasonCode: row.reason_code,
+    reasonNote: row.reason_note,
   };
 }
 
@@ -687,6 +928,14 @@ export type DeliveryItem = {
   quantity: number;
   unit: EpiUnit;
   createdAt: string;
+  /** Optional -- most EPIs have no variants. */
+  variantId: string | null;
+  /** Value-snapshot of the variant's label at delivery time, immune to a later rename. */
+  variantLabel: string | null;
+  /** Value-snapshot of the epi_version's default_lifespan_days at delivery time, or null
+   * when that EPI had no vida útil padrão configured. Immune to a later catalog edit --
+   * same discipline as epiName/caNumber/variantLabel's own comments. */
+  lifespanDays: number | null;
 };
 
 type DeliveryItemRow = {
@@ -703,10 +952,13 @@ type DeliveryItemRow = {
   quantity: number;
   unit: EpiUnit;
   created_at: string;
+  variant_id: string | null;
+  variant_label: string | null;
+  lifespan_days: number | null;
 };
 
 const DELIVERY_ITEM_COLUMNS =
-  "id, delivery_id, company_id, line_no, epi_id, epi_version_id, epi_name, ca_number, manufacturer, model, quantity, unit, created_at";
+  "id, delivery_id, company_id, line_no, epi_id, epi_version_id, epi_name, ca_number, manufacturer, model, quantity, unit, created_at, variant_id, variant_label, lifespan_days";
 
 function mapDeliveryItemRow(row: DeliveryItemRow): DeliveryItem {
   return {
@@ -723,6 +975,9 @@ function mapDeliveryItemRow(row: DeliveryItemRow): DeliveryItem {
     quantity: row.quantity,
     unit: row.unit,
     createdAt: row.created_at,
+    variantId: row.variant_id,
+    variantLabel: row.variant_label,
+    lifespanDays: row.lifespan_days,
   };
 }
 
@@ -1293,3 +1548,455 @@ export const getCompanyAuditEvents = cache(async (companyId: string, limit: numb
     createdAt: row.created_at,
   }));
 });
+
+// Phase C: EPI lifecycle / troca -----------------------------------------------------------
+// See supabase/migrations/20260903120000_epi_lifecycle_troca.sql -- the source of truth for
+// every RPC/view name and column below.
+
+/** The CURRENT status of one confirmed delivery item -- app.epi_lifecycle_status. SUBSTITUIDO/
+ * PERDIDO (spec §10) are not separate values here; a superseded delivery simply stops
+ * appearing in getEmployeeEpiLifecycle at all (see that RPC's own comment). */
+export type EpiLifecycleStatus = "VIGENTE" | "PROXIMO_DA_TROCA" | "TROCA_NECESSARIA" | "DEVOLVIDO" | "DESCARTADO";
+
+export type EmployeeEpiLifecycle = {
+  deliveryId: string;
+  deliveryItemId: string;
+  epiId: string;
+  epiName: string;
+  caNumber: string;
+  variantLabel: string | null;
+  quantity: number;
+  confirmedAt: string | null;
+  lifespanDays: number | null;
+  /** confirmed_at + lifespan_days, or null when this item tracks no lifespan at all. */
+  dueDate: string | null;
+  status: EpiLifecycleStatus;
+  /** dueDate minus today, negative when overdue. Null alongside dueDate. */
+  daysRemaining: number | null;
+};
+
+type EmployeeEpiLifecycleRow = {
+  delivery_id: string;
+  delivery_item_id: string;
+  epi_id: string;
+  epi_name: string;
+  ca_number: string;
+  variant_label: string | null;
+  quantity: number;
+  confirmed_at: string | null;
+  lifespan_days: number | null;
+  due_date: string | null;
+  status: EpiLifecycleStatus;
+  days_remaining: number | null;
+};
+
+/** Per-item lifecycle status for one employee's currently-held (CONFIRMED, non-superseded)
+ * deliveries, via the api.employee_epi_lifecycle RPC -- requires employee.read on the
+ * employee's company (enforced by the RPC itself). */
+export const getEmployeeEpiLifecycle = cache(async (employeeId: string): Promise<EmployeeEpiLifecycle[]> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.schema("api").rpc("employee_epi_lifecycle", { p_employee_id: employeeId });
+
+  if (error || !data) return [];
+
+  return (data as EmployeeEpiLifecycleRow[]).map((row) => ({
+    deliveryId: row.delivery_id,
+    deliveryItemId: row.delivery_item_id,
+    epiId: row.epi_id,
+    epiName: row.epi_name,
+    caNumber: row.ca_number,
+    variantLabel: row.variant_label,
+    quantity: row.quantity,
+    confirmedAt: row.confirmed_at,
+    lifespanDays: row.lifespan_days,
+    dueDate: row.due_date,
+    status: row.status,
+    daysRemaining: row.days_remaining,
+  }));
+});
+
+export type PendingReturn = {
+  deliveryId: string;
+  deliveryItemId: string;
+  epiId: string;
+  epiName: string;
+  caNumber: string;
+  employeeId: string;
+  employeeFullName: string;
+  supersededAt: string;
+  /** The delivery that replaced this one (the "troca"), if any -- where the actual
+   * devolução would be recorded via ReturnItemForm. */
+  replacedByDeliveryId: string | null;
+};
+
+type PendingReturnRow = {
+  delivery_id: string;
+  delivery_item_id: string;
+  epi_id: string;
+  epi_name: string;
+  ca_number: string;
+  employee_id: string;
+  employee_full_name: string;
+  superseded_at: string;
+  replaced_by_delivery_id: string | null;
+};
+
+/** Open devolução pendencies for one company ("se não for devolvido, gerar pendência", spec
+ * §9): a superseded ("troca'd") delivery whose EPI is flagged requires_return_on_replacement
+ * but never got an api.epi_returns row, via the api.pending_returns RPC. Requires
+ * delivery.return on the company (enforced by the RPC itself). */
+export const getPendingReturns = cache(async (companyId: string): Promise<PendingReturn[]> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.schema("api").rpc("pending_returns", { p_company_id: companyId });
+
+  if (error || !data) return [];
+
+  return (data as PendingReturnRow[]).map((row) => ({
+    deliveryId: row.delivery_id,
+    deliveryItemId: row.delivery_item_id,
+    epiId: row.epi_id,
+    epiName: row.epi_name,
+    caNumber: row.ca_number,
+    employeeId: row.employee_id,
+    employeeFullName: row.employee_full_name,
+    supersededAt: row.superseded_at,
+    replacedByDeliveryId: row.replaced_by_delivery_id,
+  }));
+});
+
+export type EarlyReplacementPolicy = "warn" | "block" | "allow";
+
+export type OrganizationPolicy = {
+  organizationId: string;
+  earlyReplacementPolicy: EarlyReplacementPolicy;
+  replacementAlertDays: number;
+  stockNegativeAllowed: boolean;
+  inventoryEnabled: boolean;
+  complianceEnabled: boolean;
+  roleMatrixEnabled: boolean;
+  defaultAssuranceLevel: AssuranceLevel;
+  linkTtlHours: number;
+  identityMaxAttempts: number;
+  evidenceRetentionMonths: number;
+};
+
+type OrganizationPolicyRow = {
+  organization_id: string;
+  early_replacement_policy: EarlyReplacementPolicy;
+  replacement_alert_days: number;
+  stock_negative_allowed: boolean;
+  inventory_enabled: boolean;
+  compliance_enabled: boolean;
+  role_matrix_enabled: boolean;
+  default_assurance_level: AssuranceLevel;
+  link_ttl_hours: number;
+  identity_max_attempts: number;
+  evidence_retention_months: number;
+};
+
+const ORGANIZATION_POLICY_COLUMNS =
+  "organization_id, early_replacement_policy, replacement_alert_days, stock_negative_allowed, inventory_enabled, compliance_enabled, role_matrix_enabled, default_assurance_level, link_ttl_hours, identity_max_attempts, evidence_retention_months";
+
+/** Org-wide policy/feature-flag settings, via api.organization_policy (RLS: visible only for
+ * the caller's own organizations). Written via api.update_organization_policy, ORG_ADMIN
+ * only -- see src/app/(dashboard)/settings for the write path. */
+export const getOrganizationPolicy = cache(async (organizationId: string): Promise<OrganizationPolicy | null> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return null;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .from("organization_policy")
+    .select(ORGANIZATION_POLICY_COLUMNS)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  const row = data as OrganizationPolicyRow;
+  return {
+    organizationId: row.organization_id,
+    earlyReplacementPolicy: row.early_replacement_policy,
+    replacementAlertDays: row.replacement_alert_days,
+    stockNegativeAllowed: row.stock_negative_allowed,
+    inventoryEnabled: row.inventory_enabled,
+    complianceEnabled: row.compliance_enabled,
+    roleMatrixEnabled: row.role_matrix_enabled,
+    defaultAssuranceLevel: row.default_assurance_level,
+    linkTtlHours: row.link_ttl_hours,
+    identityMaxAttempts: row.identity_max_attempts,
+    evidenceRetentionMonths: row.evidence_retention_months,
+  };
+});
+
+// Phase B: locations / stock -----------------------------------------------------------
+// See supabase/migrations/20260903110000_locations.sql and 20260903110100_stock.sql (as
+// amended by 20260903130000_stock_location_transfer_gate_fixes.sql) -- the source of truth
+// for every RPC/view name and column below.
+
+export type LocationStatus = "ACTIVE" | "INACTIVE";
+
+/** A site/unit within one company ("local/unidade") -- NOT a rename of Company, which stays
+ * the CNPJ/legal-entity tenant boundary. Stock is tracked per (companyId, locationId); a
+ * null locationId elsewhere in this file means the company-wide bucket, not tied to a site. */
+export type Location = {
+  id: string;
+  organizationId: string;
+  companyId: string;
+  name: string;
+  code: string | null;
+  address: Record<string, unknown>;
+  status: LocationStatus;
+  createdAt: string;
+};
+
+type LocationRow = {
+  id: string;
+  organization_id: string;
+  company_id: string;
+  name: string;
+  code: string | null;
+  address: Record<string, unknown>;
+  status: LocationStatus;
+  created_at: string;
+};
+
+const LOCATION_COLUMNS = "id, organization_id, company_id, name, code, address, status, created_at";
+
+function mapLocationRow(row: LocationRow): Location {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    companyId: row.company_id,
+    name: row.name,
+    code: row.code,
+    address: row.address,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
+/** Locations ("unidades/locais") of one company, via api.locations (RLS-scoped). */
+export const getLocations = cache(async (companyId: string): Promise<Location[]> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .from("locations")
+    .select(LOCATION_COLUMNS)
+    .eq("company_id", companyId)
+    .order("name", { ascending: true });
+
+  if (error || !data) return [];
+
+  return (data as LocationRow[]).map(mapLocationRow);
+});
+
+/** A single location by id, or null if it doesn't exist or isn't visible (RLS). */
+export const getLocation = cache(async (locationId: string): Promise<Location | null> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return null;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .from("locations")
+    .select(LOCATION_COLUMNS)
+    .eq("id", locationId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  return mapLocationRow(data as LocationRow);
+});
+
+export type StockMovementType =
+  | "ENTRADA"
+  | "ENTREGA"
+  | "DEVOLUCAO"
+  | "DESCARTE"
+  | "AJUSTE"
+  | "TRANSFERENCIA_SAIDA"
+  | "TRANSFERENCIA_ENTRADA";
+
+/** One row of the maintained balance cache (app.stock_balances), joined to the epi's current
+ * name/CA and (if set) the variant's label for display -- via api.stock_balances. There is no
+ * single id column: the natural key is the (companyId, locationId, epiId, variantId) tuple,
+ * with locationId/variantId nullable (a company-wide bucket, or an EPI with no variants). */
+export type StockBalance = {
+  companyId: string;
+  locationId: string | null;
+  epiId: string;
+  variantId: string | null;
+  quantity: number;
+  updatedAt: string;
+  epiName: string;
+  caNumber: string;
+  variantLabel: string | null;
+};
+
+type StockBalanceRow = {
+  company_id: string;
+  location_id: string | null;
+  epi_id: string;
+  variant_id: string | null;
+  quantity: number;
+  updated_at: string;
+  epi_name: string;
+  ca_number: string;
+  variant_label: string | null;
+};
+
+const STOCK_BALANCE_COLUMNS =
+  "company_id, location_id, epi_id, variant_id, quantity, updated_at, epi_name, ca_number, variant_label";
+
+function mapStockBalanceRow(row: StockBalanceRow): StockBalance {
+  return {
+    companyId: row.company_id,
+    locationId: row.location_id,
+    epiId: row.epi_id,
+    variantId: row.variant_id,
+    quantity: row.quantity,
+    updatedAt: row.updated_at,
+    epiName: row.epi_name,
+    caNumber: row.ca_number,
+    variantLabel: row.variant_label,
+  };
+}
+
+export type StockBalanceQuery = {
+  locationId?: string;
+  epiId?: string;
+};
+
+/**
+ * Stock balances for one company, via api.stock_balances (RLS-scoped). Filtered in
+ * Postgres, not in JS -- same discipline as getDeliveriesPage's own comment, though this
+ * cache table is naturally bounded (one row per company x location x epi x variant
+ * combination that has ever moved, never one row per movement) so no pagination is needed
+ * the way the delivery ledger requires.
+ */
+export const getStockBalances = cache(
+  async (companyId: string, opts: StockBalanceQuery = {}): Promise<StockBalance[]> => {
+    const session = await verifySession();
+    if (!session.isAuthenticated) return [];
+
+    const supabase = await createClient();
+    let builder = supabase
+      .schema("api")
+      .from("stock_balances")
+      .select(STOCK_BALANCE_COLUMNS)
+      .eq("company_id", companyId);
+
+    if (opts.locationId) builder = builder.eq("location_id", opts.locationId);
+    if (opts.epiId) builder = builder.eq("epi_id", opts.epiId);
+
+    const { data, error } = await builder.order("epi_name", { ascending: true });
+
+    if (error || !data) return [];
+
+    return (data as StockBalanceRow[]).map(mapStockBalanceRow);
+  },
+);
+
+/** One row of the append-only stock ledger (app.stock_movements), via api.stock_movements. */
+export type StockMovement = {
+  id: string;
+  organizationId: string;
+  companyId: string;
+  locationId: string | null;
+  epiId: string;
+  variantId: string | null;
+  movementType: StockMovementType;
+  /** Signed: positive for inbound movement types, negative for outbound. */
+  quantity: number;
+  referenceDeliveryItemId: string | null;
+  referenceReturnId: string | null;
+  reason: string | null;
+  actorUserId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};
+
+type StockMovementRow = {
+  id: string;
+  organization_id: string;
+  company_id: string;
+  location_id: string | null;
+  epi_id: string;
+  variant_id: string | null;
+  movement_type: StockMovementType;
+  quantity: number;
+  reference_delivery_item_id: string | null;
+  reference_return_id: string | null;
+  reason: string | null;
+  actor_user_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+const STOCK_MOVEMENT_COLUMNS =
+  "id, organization_id, company_id, location_id, epi_id, variant_id, movement_type, quantity, reference_delivery_item_id, reference_return_id, reason, actor_user_id, metadata, created_at";
+
+function mapStockMovementRow(row: StockMovementRow): StockMovement {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    companyId: row.company_id,
+    locationId: row.location_id,
+    epiId: row.epi_id,
+    variantId: row.variant_id,
+    movementType: row.movement_type,
+    quantity: row.quantity,
+    referenceDeliveryItemId: row.reference_delivery_item_id,
+    referenceReturnId: row.reference_return_id,
+    reason: row.reason,
+    actorUserId: row.actor_user_id,
+    metadata: row.metadata,
+    createdAt: row.created_at,
+  };
+}
+
+export type StockMovementQuery = {
+  locationId?: string;
+  epiId?: string;
+  /** Defaults to 100 -- an append-only ledger has no natural upper bound, so this is never
+   * omitted, same rationale as getDeliveriesPage's own comment about not shipping a whole
+   * table to a server component on every page view. */
+  limit?: number;
+};
+
+/** The stock ledger for one company, via api.stock_movements (RLS-scoped), newest first. */
+export const getStockMovements = cache(
+  async (companyId: string, opts: StockMovementQuery = {}): Promise<StockMovement[]> => {
+    const session = await verifySession();
+    if (!session.isAuthenticated) return [];
+
+    const supabase = await createClient();
+    let builder = supabase
+      .schema("api")
+      .from("stock_movements")
+      .select(STOCK_MOVEMENT_COLUMNS)
+      .eq("company_id", companyId);
+
+    if (opts.locationId) builder = builder.eq("location_id", opts.locationId);
+    if (opts.epiId) builder = builder.eq("epi_id", opts.epiId);
+
+    const { data, error } = await builder
+      .order("created_at", { ascending: false })
+      .limit(opts.limit ?? 100);
+
+    if (error || !data) return [];
+
+    return (data as StockMovementRow[]).map(mapStockMovementRow);
+  },
+);

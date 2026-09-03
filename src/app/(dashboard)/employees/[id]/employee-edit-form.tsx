@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import type { Employee } from "@/lib/supabase/dal";
+import type { Employee, JobPosition, Location } from "@/lib/supabase/dal";
 import { useT } from "@/i18n/provider";
 import { updateEmployee, type EmployeeFormState } from "../actions";
 
@@ -23,7 +23,15 @@ const selectClassName = cn(
  * api.update_employee's own comment). Status leads the form: it is the field managers
  * actually come to this screen to change, and burying it under six text inputs was why it
  * read as "you cannot edit this person". */
-export function EmployeeEditForm({ employee }: { employee: Employee }) {
+export function EmployeeEditForm({
+  employee,
+  positions,
+  locations,
+}: {
+  employee: Employee;
+  positions: JobPosition[];
+  locations: Location[];
+}) {
   const t = useT();
   const [state, formAction, pending] = useActionState(updateEmployee, initialState);
 
@@ -80,6 +88,40 @@ export function EmployeeEditForm({ employee }: { employee: Employee }) {
         <div className="flex flex-col gap-2 sm:col-span-2">
           <Label htmlFor="email">{t.common.email}</Label>
           <Input id="email" name="email" type="email" className="h-11" defaultValue={employee.email ?? ""} />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="positionId">{t.employees.positionCatalogLabel}</Label>
+          <select
+            id="positionId"
+            name="positionId"
+            defaultValue={employee.positionId ?? ""}
+            className={cn(selectClassName, "h-11")}
+          >
+            <option value="">{t.employees.noPositionOption}</option>
+            {positions.map((position) => (
+              <option key={position.id} value={position.id}>
+                {position.title}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="locationId">{t.employees.locationCatalogLabel}</Label>
+          <select
+            id="locationId"
+            name="locationId"
+            defaultValue={employee.locationId ?? ""}
+            className={cn(selectClassName, "h-11")}
+          >
+            <option value="">{t.employees.noLocationOption}</option>
+            {locations.map((location) => (
+              <option key={location.id} value={location.id}>
+                {location.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="flex flex-col gap-2">

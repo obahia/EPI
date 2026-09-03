@@ -1,9 +1,10 @@
 import { notFound, redirect } from "next/navigation";
-import { verifySession, getEpi } from "@/lib/supabase/dal";
+import { verifySession, getEpi, getEpiVariants } from "@/lib/supabase/dal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary } from "@/i18n/dictionaries";
 import { EpiEditForm } from "./epi-edit-form";
+import { EpiVariants } from "./epi-variants";
 
 export default async function EpiPage({
   params,
@@ -26,6 +27,7 @@ export default async function EpiPage({
 
   const { company: companyParam } = await searchParams;
   const returnCompanyId = companyParam ?? epi.companyId ?? "";
+  const variants = await getEpiVariants(epi.id);
 
   return (
     <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
@@ -42,6 +44,16 @@ export default async function EpiPage({
         </CardHeader>
         <CardContent>
           <EpiEditForm epi={epi} returnCompanyId={returnCompanyId} />
+        </CardContent>
+      </Card>
+
+      <Card className="max-w-lg">
+        <CardHeader>
+          <CardTitle>{t.epis.variantsTitle}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="mb-4 text-[13px] text-muted-foreground">{t.epis.variantsHint}</p>
+          <EpiVariants epiId={epi.id} variants={variants} />
         </CardContent>
       </Card>
     </main>

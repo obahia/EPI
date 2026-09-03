@@ -30,6 +30,8 @@ export async function createEmployee(_prevState: EmployeeFormState, formData: Fo
     email: z.email(t.employees.invalidEmail).optional().or(z.literal("")),
     positionTitle: z.string().trim().max(120).optional(),
     department: z.string().trim().max(120).optional(),
+    positionId: z.uuid().optional(),
+    locationId: z.uuid().optional(),
   });
 
   const parsed = createSchema.safeParse({
@@ -41,6 +43,8 @@ export async function createEmployee(_prevState: EmployeeFormState, formData: Fo
     email: formData.get("email") || undefined,
     positionTitle: formData.get("positionTitle") || undefined,
     department: formData.get("department") || undefined,
+    positionId: formData.get("positionId") || undefined,
+    locationId: formData.get("locationId") || undefined,
   });
 
   if (!parsed.success) {
@@ -72,6 +76,8 @@ export async function createEmployee(_prevState: EmployeeFormState, formData: Fo
     p_email: parsed.data.email || null,
     p_position_title: parsed.data.positionTitle || null,
     p_department: parsed.data.department || null,
+    p_position_id: parsed.data.positionId || null,
+    p_location_id: parsed.data.locationId || null,
   });
 
   if (error) {
@@ -97,6 +103,8 @@ export async function updateEmployee(_prevState: EmployeeFormState, formData: Fo
     positionTitle: z.string().trim().max(120).optional(),
     department: z.string().trim().max(120).optional(),
     status: z.enum(["ACTIVE", "ON_LEAVE", "TERMINATED"]),
+    positionId: z.uuid().optional(),
+    locationId: z.uuid().optional(),
   });
 
   const parsed = updateSchema.safeParse({
@@ -109,6 +117,8 @@ export async function updateEmployee(_prevState: EmployeeFormState, formData: Fo
     positionTitle: formData.get("positionTitle") || undefined,
     department: formData.get("department") || undefined,
     status: formData.get("status"),
+    positionId: formData.get("positionId") || undefined,
+    locationId: formData.get("locationId") || undefined,
   });
 
   if (!parsed.success) {
@@ -133,6 +143,8 @@ export async function updateEmployee(_prevState: EmployeeFormState, formData: Fo
     p_position_title: parsed.data.positionTitle || null,
     p_department: parsed.data.department || null,
     p_status: parsed.data.status,
+    p_position_id: parsed.data.positionId || null,
+    p_location_id: parsed.data.locationId || null,
   });
 
   if (error) {

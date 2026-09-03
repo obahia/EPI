@@ -10,6 +10,9 @@ import {
   getEvidenceSummary,
   getDeliveryBatches,
   getReturnsForItems,
+  getEpis,
+  getEpiVariants,
+  type EpiVariant,
 } from "@/lib/supabase/dal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -24,8 +27,17 @@ import { ContestPanel } from "./contest-panel";
 import { AuditTimeline } from "./audit-timeline";
 import { SealedReceipt } from "./sealed-receipt";
 import { ReturnItemForm } from "./return-item-form";
+import { ReplaceDeliveryForm } from "./replace-delivery-form";
 import { LIVE_CONFIRMATION_STATUSES, epiReturnReasonLabel } from "./labels";
 import { formatDateTimeBr, formatDayBr } from "@/lib/format/datetime";
+
+/** Whole days since a delivery was confirmed -- the impure Date.now() call lives in its own
+ * named helper rather than inline in the component body, same convention as
+ * needs-attention.tsx's own daysWaiting(). */
+function daysSinceConfirmed(confirmedAt: string): number {
+  const ms = Date.now() - new Date(confirmedAt).getTime();
+  return Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 86_400_000) : 0;
+}
 
 export default async function DeliveryPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await verifySession();
@@ -55,18 +67,52 @@ export default async function DeliveryPage({ params }: { params: Promise<{ id: s
     notFound();
   }
 
+  // "Trocar EPI" (api.create_replacement_delivery) only accepts a CONFIRMED/CONTESTED
+  // original -- gates both the button below and the extra catalog fetch it needs, so a
+  // DRAFT/ISSUED/CANCELLED/SUPERSEDED delivery never pays for epis/variants it can't use.
+  const canReplace = delivery.status === "CONFIRMED" || delivery.status === "CONTESTED";
+
   // The mockup's subtitle names the batch the delivery came out of; a one-off delivery
   // has no batch and simply drops that clause. company is only knowable once delivery
   // (and so delivery.companyId) has resolved, so it comes after the Promise.all above
   // rather than inside it -- fetched alongside the batch lookup, in parallel with that.
-  const [batches, company, returns] = await Promise.all([
+  const [batches, company, returns, epis] = await Promise.all([
     delivery.batchId ? getDeliveryBatches(delivery.companyId) : Promise.resolve([]),
     getCompany(delivery.companyId),
     getReturnsForItems(items.map((item) => item.id)),
+    canReplace ? getEpis(delivery.companyId) : Promise.resolve([]),
   ]);
   const batch = batches.find((b) => b.id === delivery.batchId) ?? null;
   const timeZone = company?.timeZone;
   const returnByItemId = new Map(returns.map((r) => [r.deliveryItemId, r]));
+
+  // Same "one getEpiVariants call per active EPI" pattern as deliveries/new/page.tsx.
+  const activeEpis = canReplace ? epis.filter((e) => e.isActive) : [];
+  const variantLists = canReplace ? await Promise.all(activeEpis.map((epi) => getEpiVariants(epi.id))) : [];
+  const variantsByEpi: Record<string, EpiVariant[]> = {};
+  activeEpis.forEach((epi, i) => {
+    const list = variantLists[i] ?? [];
+    if (list.length > 0) variantsByEpi[epi.id] = list;
+  });
+
+  // Precomputed from the ORIGINAL delivery's own items, matching api.create_replacement_
+  // delivery's own v_earliest_due logic exactly (min(confirmed_at + lifespan_days) across
+  // items that track a lifespan at all): same confirmed_at for every item on one delivery,
+  // so the earliest due date is simply whichever item has the smallest lifespan_days.
+  const trackedItems = items.filter(
+    (item): item is typeof item & { lifespanDays: number } => item.lifespanDays != null,
+  );
+  const earliestTrackedItem =
+    trackedItems.length > 0
+      ? trackedItems.reduce((a, b) => (a.lifespanDays < b.lifespanDays ? a : b))
+      : null;
+  const earlyWarning =
+    earliestTrackedItem && delivery.confirmedAt
+      ? {
+          daysSinceConfirmed: daysSinceConfirmed(delivery.confirmedAt),
+          lifespanDays: earliestTrackedItem.lifespanDays,
+        }
+      : null;
 
   const hasLiveConfirmationLink = confirmationRequests[0]
     ? LIVE_CONFIRMATION_STATUSES.has(confirmationRequests[0].status)
@@ -89,7 +135,19 @@ export default async function DeliveryPage({ params }: { params: Promise<{ id: s
         title={delivery.employeeFullName}
         titleSuffix={<DeliveryStatusBadge status={delivery.status} />}
         subtitle={subtitle}
-        actions={<DeliveryActions deliveryId={delivery.id} status={delivery.status} />}
+        actions={
+          <>
+            <DeliveryActions deliveryId={delivery.id} status={delivery.status} />
+            {canReplace ? (
+              <ReplaceDeliveryForm
+                originalDeliveryId={delivery.id}
+                epis={activeEpis}
+                variantsByEpi={variantsByEpi}
+                earlyWarning={earlyWarning}
+              />
+            ) : null}
+          </>
+        }
       />
 
       {delivery.status === "CONFIRMED" && evidence ? (

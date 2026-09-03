@@ -9,6 +9,12 @@ import {
   getOldestWaitingDeliveries,
   getDeliveryItemsFor,
   summarizeDeliveryItems,
+  getPendingReturns,
+  getOrganizationPolicy,
+  getStockBalances,
+  getLocations,
+  type StockBalance,
+  type Location,
 } from "@/lib/supabase/dal";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
@@ -16,6 +22,8 @@ import { Panel } from "@/components/panel";
 import { PendingBanner } from "@/components/pending-banner";
 import { RecentActivity } from "@/components/recent-activity";
 import { NeedsAttention } from "@/components/needs-attention";
+import { PendingReturns } from "@/components/pending-returns";
+import { LowStockPanel } from "@/components/low-stock-panel";
 import { StatItem } from "@/components/stat-item";
 import { EmptyState } from "@/components/empty-state";
 import { formatCnpj } from "@/lib/br/cnpj";
@@ -32,6 +40,10 @@ import { getDictionary } from "@/i18n/dictionaries";
  * height of the whole counter grid, the other four counters sit beside it as plain tiles,
  * and the bottom pairs the activity feed with the people who have been waiting longest.
  */
+/** Same fixed v1 threshold the standalone stock list uses (src/app/(dashboard)/stock/page.tsx)
+ * -- "estoque baixo" is quantity <= 5, no per-EPI configurable threshold yet. */
+const LOW_STOCK_THRESHOLD = 5;
+
 export default async function CompanyDashboardPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await verifySession();
   if (!session.isAuthenticated) {
@@ -43,11 +55,12 @@ export default async function CompanyDashboardPage({ params }: { params: Promise
   // Longest-waiting first: bounded to 3 rows in Postgres (deliveries_board_idx serves the
   // `status = ISSUED order by issued_at` shape) rather than sorting the company's whole
   // delivery history in JS for a right-hand column that only ever names three people.
-  const [company, summary, auditEvents, oldestWaiting] = await Promise.all([
+  const [company, summary, auditEvents, oldestWaiting, pendingReturns] = await Promise.all([
     getCompany(id),
     getDashboardSummary(id),
     getCompanyAuditEvents(id, 8),
     getOldestWaitingDeliveries(id, 3),
+    getPendingReturns(id),
   ]);
   if (!company) {
     notFound();
@@ -56,7 +69,21 @@ export default async function CompanyDashboardPage({ params }: { params: Promise
   const items = await getDeliveryItemsFor(oldestWaiting.map((d) => d.id));
   const itemsByDelivery = summarizeDeliveryItems(items);
 
+  // "Estoque baixo" only exists for an organization that has actually turned inventory on
+  // (see this migration's own comment: inventory_enabled off means no automatic ENTREGA/
+  // DEVOLUCAO movements, so balances would either be all-zero or stale manual entries).
+  const policy = await getOrganizationPolicy(company.organizationId);
+  const inventoryEnabled = policy?.inventoryEnabled ?? false;
+  let lowStockBalances: StockBalance[] = [];
+  let locations: Location[] = [];
+  if (inventoryEnabled) {
+    [lowStockBalances, locations] = await Promise.all([getStockBalances(company.id), getLocations(company.id)]);
+  }
+  const lowBalances = lowStockBalances.filter((b) => b.quantity <= LOW_STOCK_THRESHOLD);
+  const locationNameById = new Map(locations.map((l) => [l.id, l.name]));
+
   const pendingHref = `/deliveries?company=${company.id}&status=ISSUED`;
+  const stockHref = `/stock?company=${company.id}`;
 
   return (
     <main className="flex flex-1 flex-col gap-5 p-4 md:p-7.5">
@@ -115,6 +142,13 @@ export default async function CompanyDashboardPage({ params }: { params: Promise
           deliveriesHref={pendingHref}
           t={t}
         />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3.5 xl:grid-cols-2">
+        <PendingReturns returns={pendingReturns} timeZone={company.timeZone} t={t} />
+        {inventoryEnabled ? (
+          <LowStockPanel balances={lowBalances} locationNameById={locationNameById} stockHref={stockHref} t={t} />
+        ) : null}
       </div>
     </main>
   );

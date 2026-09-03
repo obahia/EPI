@@ -4,11 +4,14 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Briefcase,
   Building2,
   ChevronDown,
   LayoutDashboard,
   Layers,
+  MapPin,
   Menu,
+  Package,
   ShieldCheck,
   Truck,
   Users,
@@ -35,13 +38,24 @@ import { signOut } from "@/app/(auth)/login/actions";
 
 /** Order and labels are the mockup's: Painel, Entregas, Lotes, EPIs, Funcionários,
  * Empresas -- work first, registries after. Icons are Lucide at stroke 2.75, which is
- * what the mockup's own closing note specifies. */
+ * what the mockup's own closing note specifies.
+ *
+ * Locais/Estoque (Phase B) are appended after Cargos rather than interleaved into the
+ * mockup's original order, which predates them. Estoque is always shown rather than
+ * gated on organization_policy.inventory_enabled: AppSidebar is a client component that
+ * only ever receives the plain `identity` prop (name/role/company), never org policy, and
+ * making it async/server-aware just to hide one row would be a much bigger structural
+ * change than the alternative -- the stock pages themselves show a "recurso desativado"
+ * note when the flag is off (see src/app/(dashboard)/stock/page.tsx). */
 const LINKS = [
   { href: "/dashboard", key: "dashboard" as const, icon: LayoutDashboard },
   { href: "/deliveries", key: "deliveries" as const, icon: Truck },
   { href: "/deliveries/batches", key: "batches" as const, icon: Layers },
   { href: "/epis", key: "epis" as const, icon: ShieldCheck },
   { href: "/employees", key: "employees" as const, icon: Users },
+  { href: "/positions", key: "positions" as const, icon: Briefcase },
+  { href: "/locations", key: "locations" as const, icon: MapPin },
+  { href: "/stock", key: "stock" as const, icon: Package },
   { href: "/companies", key: "companies" as const, icon: Building2 },
 ];
 

@@ -11,17 +11,33 @@ import { getDictionary } from "@/i18n/dictionaries";
 
 export type DeliveryFormState = { error: string | null };
 
+const REASON_CODES = [
+  "FIRST_ISSUE",
+  "PERIODIC_REPLACEMENT",
+  "WEAR",
+  "DAMAGE",
+  "LOSS",
+  "SIZE_CHANGE",
+  "ROLE_CHANGE",
+  "EXPIRATION",
+  "OTHER",
+] as const;
+
 const itemSchema = z.object({
   epiId: z.uuid(),
   quantity: z.coerce.number().int().min(1).max(10000),
+  variantId: z.uuid().optional(),
 });
 
 /**
  * Creates a DRAFT delivery + its line items via api.create_delivery. Line items arrive as
- * repeated `epiId`/`quantity` form fields (one pair per row in the repeatable item UI --
- * see delivery-form.tsx) rather than a single JSON blob, so the browser's own native form
- * semantics (no JS required to keep them in sync) do the zipping; `unit` is intentionally
- * omitted from the payload so the RPC defaults each line to the EPI's own default_unit.
+ * repeated `epiId`/`quantity`/`variantId` form fields (one triplet per row in the repeatable
+ * item UI -- see delivery-form.tsx) rather than a single JSON blob, so the browser's own
+ * native form semantics (no JS required to keep them in sync) do the zipping; `unit` is
+ * intentionally omitted from the payload so the RPC defaults each line to the EPI's own
+ * default_unit. `variantId` is an empty string (never omitted -- see the form's comment)
+ * when the row has no variant picker or none was chosen, and is dropped from the payload
+ * in that case so the RPC sees no variant_id at all, same as every pre-Phase-A caller.
  */
 export async function createDelivery(_prevState: DeliveryFormState, formData: FormData): Promise<DeliveryFormState> {
   const t = getDictionary(await getLocale());
@@ -30,6 +46,8 @@ export async function createDelivery(_prevState: DeliveryFormState, formData: Fo
     employeeId: z.uuid(t.deliveries.selectEmployee),
     deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, t.deliveries.invalidDate),
     note: z.string().trim().max(2000).optional(),
+    reasonCode: z.enum(REASON_CODES).default("FIRST_ISSUE"),
+    reasonNote: z.string().trim().max(1000).optional(),
   });
 
   const parsed = createSchema.safeParse({
@@ -37,6 +55,8 @@ export async function createDelivery(_prevState: DeliveryFormState, formData: Fo
     employeeId: formData.get("employeeId"),
     deliveryDate: formData.get("deliveryDate"),
     note: formData.get("note") || undefined,
+    reasonCode: formData.get("reasonCode") || undefined,
+    reasonNote: formData.get("reasonNote") || undefined,
   });
 
   if (!parsed.success) {
@@ -45,18 +65,27 @@ export async function createDelivery(_prevState: DeliveryFormState, formData: Fo
 
   const epiIds = formData.getAll("epiId");
   const quantities = formData.getAll("quantity");
+  const variantIds = formData.getAll("variantId");
 
   if (epiIds.length === 0) {
     return { error: t.deliveries.atLeastOneItem };
   }
 
-  const items: { epi_id: string; quantity: number }[] = [];
+  const items: { epi_id: string; quantity: number; variant_id?: string }[] = [];
   for (let i = 0; i < epiIds.length; i++) {
-    const parsedItem = itemSchema.safeParse({ epiId: epiIds[i], quantity: quantities[i] });
+    const parsedItem = itemSchema.safeParse({
+      epiId: epiIds[i],
+      quantity: quantities[i],
+      variantId: variantIds[i] || undefined,
+    });
     if (!parsedItem.success) {
       return { error: t.deliveries.invalidItemLine };
     }
-    items.push({ epi_id: parsedItem.data.epiId, quantity: parsedItem.data.quantity });
+    items.push({
+      epi_id: parsedItem.data.epiId,
+      quantity: parsedItem.data.quantity,
+      ...(parsedItem.data.variantId ? { variant_id: parsedItem.data.variantId } : {}),
+    });
   }
 
   const supabase = await createClient();
@@ -66,6 +95,8 @@ export async function createDelivery(_prevState: DeliveryFormState, formData: Fo
     p_delivery_date: parsed.data.deliveryDate,
     p_note: parsed.data.note || null,
     p_items: items,
+    p_reason_code: parsed.data.reasonCode,
+    p_reason_note: parsed.data.reasonNote || null,
   });
 
   if (error) {
@@ -73,6 +104,116 @@ export async function createDelivery(_prevState: DeliveryFormState, formData: Fo
   }
 
   revalidatePath("/deliveries");
+  redirect(`/deliveries/${data as string}`);
+}
+
+export type ReplaceDeliveryState = {
+  error: string | null;
+  /** Which specific early-replacement outcome the RPC returned, if any -- drives whether
+   * ReplaceDeliveryForm shows its early-replacement warning panel (confirmation_required /
+   * reason_note_required) or just the plain error banner with no override (blocked). Null
+   * for every other error (validation, insufficient_privilege, not_found, etc.). */
+  code: "confirmation_required" | "reason_note_required" | "blocked" | null;
+};
+
+const replaceItemSchema = z.object({
+  epiId: z.uuid(),
+  quantity: z.coerce.number().int().min(1).max(10000),
+  variantId: z.uuid().optional(),
+});
+
+/**
+ * The "troca" (replacement) RPC: supersedes a CONFIRMED/CONTESTED delivery and creates a new
+ * DRAFT delivery in the same correction chain, via api.create_replacement_delivery. Same
+ * item-triplet-per-row form encoding as createDelivery above (see that action's own comment).
+ *
+ * `confirmEarly` starts "false"; ReplaceDeliveryForm derives its hidden field's value from
+ * this action's own last `code` (true once the RPC has said the organization's `warn` policy
+ * requires it), so a plain resubmit of the SAME form carries it forward -- no separate
+ * client-side confirmation step that could drift from what the RPC actually decided.
+ */
+export async function createReplacementDelivery(
+  _prevState: ReplaceDeliveryState,
+  formData: FormData,
+): Promise<ReplaceDeliveryState> {
+  const t = getDictionary(await getLocale());
+  const schema = z.object({
+    originalDeliveryId: z.uuid(),
+    deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, t.deliveries.invalidDate),
+    note: z.string().trim().max(2000).optional(),
+    reasonCode: z.enum(REASON_CODES).default("FIRST_ISSUE"),
+    reasonNote: z.string().trim().max(1000).optional(),
+    confirmEarly: z.enum(["true", "false"]).default("false"),
+  });
+
+  const parsed = schema.safeParse({
+    originalDeliveryId: formData.get("originalDeliveryId"),
+    deliveryDate: formData.get("deliveryDate"),
+    note: formData.get("note") || undefined,
+    reasonCode: formData.get("reasonCode") || undefined,
+    reasonNote: formData.get("reasonNote") || undefined,
+    confirmEarly: formData.get("confirmEarly") || "false",
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? t.deliveries.invalidData, code: null };
+  }
+
+  const epiIds = formData.getAll("epiId");
+  const quantities = formData.getAll("quantity");
+  const variantIds = formData.getAll("variantId");
+
+  if (epiIds.length === 0) {
+    return { error: t.deliveries.atLeastOneItem, code: null };
+  }
+
+  const items: { epi_id: string; quantity: number; variant_id?: string }[] = [];
+  for (let i = 0; i < epiIds.length; i++) {
+    const parsedItem = replaceItemSchema.safeParse({
+      epiId: epiIds[i],
+      quantity: quantities[i],
+      variantId: variantIds[i] || undefined,
+    });
+    if (!parsedItem.success) {
+      return { error: t.deliveries.invalidItemLine, code: null };
+    }
+    items.push({
+      epi_id: parsedItem.data.epiId,
+      quantity: parsedItem.data.quantity,
+      ...(parsedItem.data.variantId ? { variant_id: parsedItem.data.variantId } : {}),
+    });
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.schema("api").rpc("create_replacement_delivery", {
+    p_original_delivery_id: parsed.data.originalDeliveryId,
+    p_items: items,
+    p_delivery_date: parsed.data.deliveryDate,
+    p_note: parsed.data.note || null,
+    p_reason_code: parsed.data.reasonCode,
+    p_reason_note: parsed.data.reasonNote || null,
+    p_confirm_early: parsed.data.confirmEarly === "true",
+  });
+
+  if (error) {
+    // early_replacement_confirmation_required carries no user-facing message of its own --
+    // ReplaceDeliveryForm's warning panel explains it -- while the other two early-
+    // replacement outcomes reuse describeRpcError's pt-BR text like every other RPC error.
+    if (error.message?.includes("early_replacement_confirmation_required")) {
+      return { error: null, code: "confirmation_required" };
+    }
+    return {
+      error: describeRpcError(error, t.deliveries.replaceFailed),
+      code: error.message?.includes("early_replacement_blocked")
+        ? "blocked"
+        : error.message?.includes("reason_note_required_for_early_replacement")
+          ? "reason_note_required"
+          : null,
+    };
+  }
+
+  revalidatePath("/deliveries");
+  revalidatePath(`/deliveries/${parsed.data.originalDeliveryId}`);
   redirect(`/deliveries/${data as string}`);
 }
 

@@ -29,6 +29,8 @@ export async function createEpi(_prevState: EpiFormState, formData: FormData): P
     model: z.string().trim().max(150).optional(),
     description: z.string().trim().max(2000).optional(),
     defaultUnit: z.enum(UNIT_VALUES),
+    defaultLifespanDays: z.coerce.number().int().min(1).max(3650).optional(),
+    requiresReturnOnReplacement: z.enum(["true", "false"]).default("false"),
   });
 
   const parsed = createSchema.safeParse({
@@ -41,6 +43,8 @@ export async function createEpi(_prevState: EpiFormState, formData: FormData): P
     model: formData.get("model") || undefined,
     description: formData.get("description") || undefined,
     defaultUnit: formData.get("defaultUnit"),
+    defaultLifespanDays: formData.get("defaultLifespanDays") || undefined,
+    requiresReturnOnReplacement: formData.get("requiresReturnOnReplacement") === "true" ? "true" : "false",
   });
 
   if (!parsed.success) {
@@ -57,6 +61,8 @@ export async function createEpi(_prevState: EpiFormState, formData: FormData): P
     p_model: parsed.data.model || null,
     p_description: parsed.data.description || null,
     p_default_unit: parsed.data.defaultUnit,
+    p_default_lifespan_days: parsed.data.defaultLifespanDays ?? null,
+    p_requires_return_on_replacement: parsed.data.requiresReturnOnReplacement === "true",
   });
 
   if (error) {
@@ -84,6 +90,8 @@ export async function updateEpi(_prevState: EpiFormState, formData: FormData): P
     model: z.string().trim().max(150).optional(),
     description: z.string().trim().max(2000).optional(),
     defaultUnit: z.enum(UNIT_VALUES),
+    defaultLifespanDays: z.coerce.number().int().min(1).max(3650).optional(),
+    requiresReturnOnReplacement: z.enum(["true", "false"]).default("false"),
   });
 
   const parsed = updateSchema.safeParse({
@@ -95,6 +103,8 @@ export async function updateEpi(_prevState: EpiFormState, formData: FormData): P
     model: formData.get("model") || undefined,
     description: formData.get("description") || undefined,
     defaultUnit: formData.get("defaultUnit"),
+    defaultLifespanDays: formData.get("defaultLifespanDays") || undefined,
+    requiresReturnOnReplacement: formData.get("requiresReturnOnReplacement") === "true" ? "true" : "false",
   });
 
   if (!parsed.success) {
@@ -110,6 +120,8 @@ export async function updateEpi(_prevState: EpiFormState, formData: FormData): P
     p_model: parsed.data.model || null,
     p_description: parsed.data.description || null,
     p_default_unit: parsed.data.defaultUnit,
+    p_default_lifespan_days: parsed.data.defaultLifespanDays ?? null,
+    p_requires_return_on_replacement: parsed.data.requiresReturnOnReplacement === "true",
   });
 
   if (error) {
@@ -148,4 +160,44 @@ export async function toggleEpiActive(formData: FormData): Promise<void> {
 
   revalidatePath("/epis");
   redirect(`/epis?company=${parsed.data.companyId}`);
+}
+
+export type EpiVariantFormState = { error: string | null };
+
+/** Creates a size/SKU variant under one EPI catalog entry via api.create_epi_variant.
+ * Same permission gate as editing the EPI itself -- see that RPC's own comment. */
+export async function createEpiVariant(
+  _prevState: EpiVariantFormState,
+  formData: FormData,
+): Promise<EpiVariantFormState> {
+  const t = getDictionary(await getLocale());
+  const schema = z.object({
+    epiId: z.uuid(),
+    label: z.string().trim().min(1, t.epis.variantLabelTooShort).max(30, t.epis.variantLabelTooShort),
+    sku: z.string().trim().max(60).optional(),
+  });
+
+  const parsed = schema.safeParse({
+    epiId: formData.get("epiId"),
+    label: formData.get("label"),
+    sku: formData.get("sku") || undefined,
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? t.epis.invalidData };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.schema("api").rpc("create_epi_variant", {
+    p_epi_id: parsed.data.epiId,
+    p_label: parsed.data.label,
+    p_sku: parsed.data.sku || null,
+  });
+
+  if (error) {
+    return { error: describeRpcError(error, t.epis.variantCreateFailed) };
+  }
+
+  revalidatePath(`/epis/${parsed.data.epiId}`);
+  return { error: null };
 }

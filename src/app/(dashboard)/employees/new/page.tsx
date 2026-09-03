@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { verifySession, getMyCompanies } from "@/lib/supabase/dal";
+import { verifySession, getMyCompanies, getJobPositions, getLocations } from "@/lib/supabase/dal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary } from "@/i18n/dictionaries";
@@ -24,6 +24,8 @@ export default async function NewEmployeePage({
     redirect("/employees");
   }
 
+  const [positions, locations] = await Promise.all([getJobPositions(company.id), getLocations(company.id)]);
+
   return (
     <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
       <h1 className="font-heading text-4xl font-extrabold tracking-tight">{t.employees.newEmployee}</h1>
@@ -34,7 +36,7 @@ export default async function NewEmployeePage({
           <CardTitle>{t.employees.employeeData}</CardTitle>
         </CardHeader>
         <CardContent>
-          <EmployeeCreateForm companyId={company.id} />
+          <EmployeeCreateForm companyId={company.id} positions={positions} locations={locations} />
         </CardContent>
       </Card>
     </main>

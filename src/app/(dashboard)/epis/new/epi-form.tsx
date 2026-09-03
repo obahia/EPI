@@ -128,6 +128,17 @@ export function EpiCreateForm({
         </select>
       </div>
 
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="defaultLifespanDays">{t.epis.defaultLifespanDaysLabel}</Label>
+        <Input id="defaultLifespanDays" name="defaultLifespanDays" type="number" min={1} max={3650} />
+        <p className="text-sm text-muted-foreground">{t.epis.defaultLifespanDaysHint}</p>
+      </div>
+
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" name="requiresReturnOnReplacement" value="true" />
+        {t.epis.requiresReturnOnReplacementLabel}
+      </label>
+
       {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
 
       <Button type="submit" disabled={pending || caInvalid}>
