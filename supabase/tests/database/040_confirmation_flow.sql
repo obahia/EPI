@@ -147,14 +147,20 @@ select throws_ok(
 
 reset role;
 
--- anon opens the real link: SENT -> VIEWED.
+-- anon opens the real link: SENT -> VIEWED. Passes a real IP (audit finding OBS-01: this
+-- was `null` before) rather than issuing a SEPARATE open_link call for that -- open_link
+-- reissues action_nonce on every call, viewed or not, and every later step in this file
+-- (identity attempts, CONFIRM, CONTEST) submits against the ONE nonce captured here into
+-- the 'nonce' fixture; a second call in between would silently invalidate it and fail
+-- every one of those with stale_submission, for reasons that would have nothing to do
+-- with whatever they actually test.
 do $$
 declare v_hash_b64 text; v_status text; v_nonce text;
 begin
   select extra into v_hash_b64 from fixture_ids where label = 'cr';
 
   set local role anon;
-  select view_status, action_nonce into v_status, v_nonce from worker.open_link(v_hash_b64, null);
+  select view_status, action_nonce into v_status, v_nonce from worker.open_link(v_hash_b64, '203.0.113.7'::inet);
   reset role;
 
   insert into fixture_ids values ('nonce', null, v_nonce);
@@ -166,18 +172,6 @@ select is(
   'VIEWED',
   'confirmation_requests row is VIEWED after the anon open_link call'
 );
-
--- Audit finding OBS-01: open_link is handed p_client_ip and must persist it into the
--- LINK_VIEWED event's data, not just use it for rate limiting and drop it.
-do $$
-declare v_hash_b64 text; v_status text;
-begin
-  select extra into v_hash_b64 from fixture_ids where label = 'cr';
-
-  set local role anon;
-  select view_status into v_status from worker.open_link(v_hash_b64, '203.0.113.7'::inet);
-  reset role;
-end $$;
 
 select is(
   (
