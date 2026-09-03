@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Sem sinal — confirme depois</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      body {
+        margin: 0;
+        min-height: 100svh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        padding: 28px 24px calc(28px + env(safe-area-inset-bottom));
+        text-align: center;
+        background: #f5ead8;
+        color: #201e1d;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      img {
+        width: 64px;
+        height: 64px;
+      }
+      h1 {
+        margin: 6px 0 0;
+        font-size: 21px;
+        font-weight: 800;
+        letter-spacing: -0.01em;
+      }
+      p {
+        margin: 0;
+        max-width: 32ch;
+        font-size: 15px;
+        line-height: 1.55;
+        color: #645c50;
+      }
+      .card {
+        margin-top: 6px;
+        border-radius: 20px;
+        background: #ffe1d0;
+        padding: 16px 18px;
+        max-width: 34ch;
+      }
+      .card p {
+        color: #8c491a;
+        font-size: 14px;
+        max-width: none;
+      }
+      button {
+        margin-top: 10px;
+        border: 0;
+        border-radius: 999px;
+        padding: 14px 26px;
+        font-size: 15px;
+        font-weight: 800;
+        color: #f5ead8;
+        background: #c67139;
+        cursor: pointer;
+      }
+      small {
+        color: #857a6b;
+        font-size: 12px;
+        max-width: 32ch;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <img src="/icons/icon-192.png" alt="" />
+    <h1>Você está sem sinal</h1>
+    <p>Não deu para abrir a confirmação da entrega agora.</p>
+
+    <div class="card">
+      <p>
+        <strong>Seu link continua valendo.</strong> Ele não expira hoje — normalmente vale
+        por vários dias. Assim que pegar sinal, é só abrir de novo e confirmar.
+      </p>
+    </div>
+
+    <button type="button" onclick="location.reload()">Tentar de novo</button>
+    <small>Esta página tenta sozinha assim que a internet voltar.</small>
+
+    <script>
+      // The browser kept the original /e/... address for this response, so a plain reload
+      // retries the exact link the worker scanned -- no going back to WhatsApp to find it.
+      // `online` is a coarse signal (it can fire before traffic really flows), so this is
+      // one-shot: if the retry lands here again, the button is still there.
+      var retried = false;
+      window.addEventListener("online", function () {
+        if (retried) return;
+        retried = true;
+        setTimeout(function () {
+          location.reload();
+        }, 800);
+      });
+    </script>
+  </body>
+</html>

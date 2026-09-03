@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/page-header";
 import { Panel, PanelFooter, PanelKicker } from "@/components/panel";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary, type Dict } from "@/i18n/dictionaries";
+import { formatDateTimeBr, formatDayBr } from "@/lib/format/datetime";
 
 export default async function DeliveryBatchesPage({
   searchParams,
@@ -91,7 +92,6 @@ function pendingOf(batch: DeliveryBatch): number {
  * of everything before it, with the way into it on the same line.
  */
 function LatestBatch({ batch, t }: { batch: DeliveryBatch; t: Dict }) {
-  const date = new Date(`${batch.deliveryDate}T00:00:00`);
   const pending = pendingOf(batch);
 
   return (
@@ -99,7 +99,7 @@ function LatestBatch({ batch, t }: { batch: DeliveryBatch; t: Dict }) {
       <div className="flex flex-col gap-6 xl:flex-row xl:items-center">
         <div className="xl:w-72 xl:shrink-0">
           <PanelKicker className="opacity-85">
-            {t.deliveries.latestBatch} · {date.toLocaleDateString("pt-BR")}
+            {t.deliveries.latestBatch} · {formatDayBr(batch.deliveryDate)}
             {batch.note?.trim() ? ` · ${batch.note.trim()}` : ""}
           </PanelKicker>
           <p className="mt-1 font-heading text-6xl leading-none font-extrabold tracking-tighter tabular-nums">
@@ -138,10 +138,10 @@ function BatchRow({ batch, t }: { batch: DeliveryBatch; t: Dict }) {
   return (
     <TableRow>
       <TableCell className="font-bold tabular-nums">
-        {new Date(`${batch.deliveryDate}T00:00:00`).toLocaleDateString("pt-BR")}
+        {formatDayBr(batch.deliveryDate)}
       </TableCell>
       <TableCell className="text-muted-foreground tabular-nums">
-        {new Date(batch.createdAt).toLocaleString("pt-BR")}
+        {formatDateTimeBr(batch.createdAt)}
       </TableCell>
       <TableCell className="text-right tabular-nums">{batch.totalCount}</TableCell>
       <TableCell className="text-right tabular-nums">{batch.confirmedCount}</TableCell>

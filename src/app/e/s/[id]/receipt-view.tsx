@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import QRCode from "qrcode";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { formatDayBr } from "@/lib/format/datetime";
 
 type Item = { epi_name: string; ca_number: string; manufacturer: string | null; model: string | null; quantity: number; unit: string };
 
@@ -56,7 +57,7 @@ export async function ReceiptView({
         <CardHeader>
           <CardTitle className="text-base">{employeeFullName}</CardTitle>
           <CardDescription>
-            Entrega de {new Date(`${deliveryDate}T00:00:00`).toLocaleDateString("pt-BR")}
+            Entrega de {formatDayBr(deliveryDate)}
             {note ? ` — ${note}` : ""}
           </CardDescription>
         </CardHeader>

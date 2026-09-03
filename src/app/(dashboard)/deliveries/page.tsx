@@ -4,9 +4,10 @@ import { Truck } from "lucide-react";
 import {
   verifySession,
   getMyCompanies,
-  getDeliveries,
+  getDeliveriesPage,
+  getDeliveryStatusCounts,
   getDeliveryBatches,
-  getCompanyDeliveryItems,
+  getDeliveryItemsFor,
   summarizeDeliveryItems,
   type Delivery,
   type DeliveryBatch,
@@ -21,6 +22,7 @@ import { PageHeader } from "@/components/page-header";
 import { Panel, PanelFooter } from "@/components/panel";
 import { SearchField } from "@/components/search-field";
 import { StatusFilterPills, type PillTone, type StatusFilterOption } from "@/components/status-filter-pills";
+import { formatDayBr, formatDayMonthBr } from "@/lib/format/datetime";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary, type Dict } from "@/i18n/dictionaries";
 
@@ -28,10 +30,14 @@ import { getDictionary, type Dict } from "@/i18n/dictionaries";
  * what is stuck first, what is settled last. */
 const FILTERED_STATUSES: DeliveryStatus[] = ["ISSUED", "CONFIRMED", "CONTESTED", "CANCELLED"];
 
+/** Rows per page. The mockup's footer ("Mostrando 7 de 142") and its Anterior/Próxima
+ * controls only mean anything against a real window. */
+const PAGE_SIZE = 25;
+
 export default async function DeliveriesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ company?: string; status?: string; q?: string }>;
+  searchParams: Promise<{ company?: string; status?: string; q?: string; page?: string }>;
 }) {
   const session = await verifySession();
   if (!session.isAuthenticated) {
@@ -44,7 +50,7 @@ export default async function DeliveriesPage({
     redirect("/dashboard");
   }
 
-  const { company: companyParam, status, q } = await searchParams;
+  const { company: companyParam, status, q, page } = await searchParams;
   const activeCompany = companies.find((c) => c.id === companyParam) ?? companies[0]!;
 
   return (
@@ -64,7 +70,7 @@ export default async function DeliveriesPage({
         }
       />
 
-      <DeliveryList companyId={activeCompany.id} status={status} q={q} t={t} />
+      <DeliveryList companyId={activeCompany.id} status={status} q={q} page={page} t={t} />
     </main>
   );
 }
@@ -86,25 +92,38 @@ function filterLabel(t: Dict, status: DeliveryStatus): string {
  * counted status pills above a single table, and every row ending in the one verb
  * that state actually affords -- issue a draft, resend a link nobody answered,
  * resolve a dispute, open the sealed receipt.
+ *
+ * Filtering, counting and paging all happen in Postgres. Only the rows on screen, the
+ * items belonging to them, and six counts ever cross the wire.
  */
 async function DeliveryList({
   companyId,
   status,
   q,
+  page,
   t,
 }: {
   companyId: string;
   status?: string;
   q?: string;
+  page?: string;
   t: Dict;
 }) {
-  const [deliveries, items, batches] = await Promise.all([
-    getDeliveries(companyId),
-    getCompanyDeliveryItems(companyId),
+  const activeStatus = FILTERED_STATUSES.find((s) => s === status);
+  const pageIndex = Math.max(0, (Number.parseInt(page ?? "1", 10) || 1) - 1);
+
+  const [{ rows, total }, counts, batches] = await Promise.all([
+    getDeliveriesPage(companyId, {
+      status: activeStatus,
+      q,
+      limit: PAGE_SIZE,
+      offset: pageIndex * PAGE_SIZE,
+    }),
+    getDeliveryStatusCounts(companyId),
     getDeliveryBatches(companyId),
   ]);
 
-  if (deliveries.length === 0) {
+  if (counts.total === 0) {
     return (
       <Panel>
         <EmptyState icon={Truck} message={t.deliveries.noDeliveriesYet} />
@@ -112,35 +131,36 @@ async function DeliveryList({
     );
   }
 
+  const items = await getDeliveryItemsFor(rows.map((d) => d.id));
   const itemsByDelivery = summarizeDeliveryItems(items);
   const batchesById = new Map(batches.map((batch) => [batch.id, batch]));
 
-  const activeStatus = FILTERED_STATUSES.find((s) => s === status);
   const pillTone: Partial<Record<DeliveryStatus, PillTone>> = {
     ISSUED: "primary",
     CONFIRMED: "success",
     CONTESTED: "destructive",
   };
   const options: StatusFilterOption[] = [
-    { label: t.deliveries.filterAll, count: deliveries.length },
+    { label: t.deliveries.filterAll, count: counts.total },
     ...FILTERED_STATUSES.map((s) => ({
       value: s,
       label: filterLabel(t, s),
-      count: deliveries.filter((d) => d.status === s).length,
+      count: counts.byStatus[s],
       tone: pillTone[s],
     })),
   ];
 
-  const needle = q?.trim().toLowerCase();
-  const shown = deliveries
-    .filter((d) => (activeStatus ? d.status === activeStatus : true))
-    .filter((d) => {
-      if (!needle) return true;
-      if (d.employeeFullName.toLowerCase().includes(needle)) return true;
-      return items.some((item) => item.deliveryId === d.id && item.caNumber.toLowerCase().includes(needle));
-    });
-
   const kept = { company: companyId, ...(q ? { q } : {}) };
+  const firstShown = total === 0 ? 0 : pageIndex * PAGE_SIZE + 1;
+  const lastShown = Math.min(total, (pageIndex + 1) * PAGE_SIZE);
+
+  function pageHref(target: number): string {
+    const search = new URLSearchParams({ company: companyId });
+    if (activeStatus) search.set("status", activeStatus);
+    if (q) search.set("q", q);
+    if (target > 0) search.set("page", String(target + 1));
+    return `/deliveries?${search.toString()}`;
+  }
 
   return (
     <>
@@ -155,7 +175,7 @@ async function DeliveryList({
         <StatusFilterPills options={options} active={activeStatus} basePath="/deliveries" params={kept} />
       </div>
 
-      {shown.length === 0 ? (
+      {rows.length === 0 ? (
         <Panel>
           <EmptyState icon={Truck} message={t.common.noResults} />
         </Panel>
@@ -174,7 +194,7 @@ async function DeliveryList({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {shown.map((delivery) => (
+              {rows.map((delivery) => (
                 <DeliveryRow
                   key={delivery.id}
                   delivery={delivery}
@@ -188,13 +208,52 @@ async function DeliveryList({
 
           <PanelFooter>
             <p>
-              {t.employees.showingCount} {shown.length} {t.employees.ofCount} {deliveries.length}{" "}
+              {t.employees.showingCount} {firstShown}–{lastShown} {t.employees.ofCount} {total}{" "}
               {t.companies.deliveriesUnit}
             </p>
+            <div className="flex items-center gap-2">
+              <PageLink href={pageHref(pageIndex - 1)} disabled={pageIndex === 0}>
+                {t.common.previous}
+              </PageLink>
+              <PageLink href={pageHref(pageIndex + 1)} disabled={lastShown >= total} emphasis>
+                {t.common.next}
+              </PageLink>
+            </div>
           </PanelFooter>
         </Panel>
       )}
     </>
+  );
+}
+
+/** A disabled pager control stays visible but stops being a link -- the mockup shows both
+ * controls at all times, and a link that silently goes nowhere is worse than a dead one. */
+function PageLink({
+  href,
+  disabled,
+  emphasis = false,
+  children,
+}: {
+  href: string;
+  disabled: boolean;
+  emphasis?: boolean;
+  children: React.ReactNode;
+}) {
+  const base = "inline-flex h-8.5 items-center rounded-full px-4 text-[13px] font-bold";
+  if (disabled) {
+    return <span className={`${base} text-muted-foreground/50`}>{children}</span>;
+  }
+  return (
+    <Link
+      href={href}
+      className={
+        emphasis
+          ? `${base} bg-foreground text-background transition-colors hover:bg-foreground/85`
+          : `${base} text-foreground transition-colors hover:bg-foreground/6`
+      }
+    >
+      {children}
+    </Link>
   );
 }
 
@@ -260,7 +319,6 @@ function DeliveryRow({
   t: Dict;
 }) {
   const note = confirmationNote(delivery, t);
-  const batchDate = batch ? new Date(`${batch.deliveryDate}T00:00:00`) : null;
 
   return (
     <TableRow>
@@ -269,15 +327,15 @@ function DeliveryRow({
           {delivery.employeeFullName}
         </Link>
       </TableCell>
-      <TableCell className="tabular-nums">
-        {new Date(`${delivery.deliveryDate}T00:00:00`).toLocaleDateString("pt-BR")}
-      </TableCell>
+      <TableCell className="tabular-nums">{formatDayBr(delivery.deliveryDate)}</TableCell>
       <TableCell className="text-muted-foreground">
-        {items ? `${items.lines} ${items.lines === 1 ? t.deliveries.itemSingular : t.deliveries.itemPlural} · ${items.units} ${t.deliveries.unitsShort}` : "—"}
+        {items
+          ? `${items.lines} ${items.lines === 1 ? t.deliveries.itemSingular : t.deliveries.itemPlural} · ${items.units} ${t.deliveries.unitsShort}`
+          : "—"}
       </TableCell>
       <TableCell className="font-mono text-[12px] text-muted-foreground">
-        {batchDate
-          ? `${batchDate.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })}${batch?.note?.trim() ? ` ${batch.note.trim()}` : ""}`
+        {batch
+          ? `${formatDayMonthBr(batch.deliveryDate)}${batch.note?.trim() ? ` ${batch.note.trim()}` : ""}`
           : "—"}
       </TableCell>
       <TableCell className={note.emphasis ? "font-bold text-primary-deep" : "text-muted-foreground"}>

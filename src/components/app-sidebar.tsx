@@ -91,7 +91,7 @@ function SidebarBody({ identity, onNavigate }: { identity: SidebarIdentity | nul
   const pathname = usePathname();
 
   return (
-    <div className="flex h-full flex-col bg-sidebar px-4.5 pt-5.5 pb-4.5 text-sidebar-foreground">
+    <div className="flex h-full flex-col bg-sidebar px-4.5 pt-[max(1.375rem,env(safe-area-inset-top))] pb-4.5 text-sidebar-foreground">
       <div className="flex items-center gap-2.5 px-1.5">
         <SealMark className="size-8" />
         <span className="font-heading text-xl font-extrabold tracking-tight">{t.brand.name}</span>
@@ -203,7 +203,7 @@ export function AppSidebar({ identity }: { identity: SidebarIdentity | null }) {
         <SidebarBody identity={identity} />
       </aside>
 
-      <header className="flex items-center justify-between border-b border-border bg-sidebar px-4 py-3 md:hidden">
+      <header className="flex items-center justify-between border-b border-border bg-sidebar px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:hidden">
         <div className="flex items-center gap-2">
           <SealMark className="size-7" />
           <span className="font-heading text-lg font-extrabold tracking-tight">{t.brand.name}</span>

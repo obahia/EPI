@@ -3,9 +3,10 @@ import type { ConfirmationRequest } from "@/lib/supabase/dal";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary } from "@/i18n/dictionaries";
 import { assuranceLevelLabel, confirmationStatusLabel } from "./labels";
+import { formatDateTimeBr } from "@/lib/format/datetime";
 
 function fmt(value: string): string {
-  return new Date(value).toLocaleString("pt-BR");
+  return formatDateTimeBr(value);
 }
 
 /**

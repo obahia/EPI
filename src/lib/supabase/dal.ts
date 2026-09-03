@@ -99,6 +99,10 @@ export type Company = {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** IANA zone of the parent organization (app.organizations.timezone), e.g.
+   * "America/Sao_Paulo". Null only if the join in api.companies somehow found no parent
+   * row -- callers should fall back to BRAZIL_TIME_ZONE from src/lib/format/datetime.ts. */
+  timeZone: string | null;
 };
 
 type CompanyRow = {
@@ -112,10 +116,11 @@ type CompanyRow = {
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+  time_zone: string | null;
 };
 
 const COMPANY_COLUMNS =
-  "id, organization_id, organization_kind, cnpj, legal_name, trade_name, status, archived_at, created_at, updated_at";
+  "id, organization_id, organization_kind, cnpj, legal_name, trade_name, status, archived_at, created_at, updated_at, time_zone";
 
 function mapCompanyRow(row: CompanyRow): Company {
   return {
@@ -129,6 +134,7 @@ function mapCompanyRow(row: CompanyRow): Company {
     archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    timeZone: row.time_zone,
   };
 }
 
@@ -474,6 +480,181 @@ export const getDeliveries = cache(async (companyId: string): Promise<Delivery[]
   return (data as DeliveryRow[]).map(mapDeliveryRow);
 });
 
+export type DeliveryPage = {
+  rows: Delivery[];
+  /** Total matching the same filters, ignoring the page window -- for "showing X of Y". */
+  total: number;
+};
+
+export type DeliveryQuery = {
+  status?: DeliveryStatus;
+  /** Matches the employee's name or an item's CA number. */
+  q?: string;
+  limit: number;
+  offset: number;
+};
+
+/**
+ * One page of a company's deliveries, filtered and counted in Postgres.
+ *
+ * Replaces reading the whole table and slicing in JS. A company that issues one batch of
+ * 20,000 deliveries (the cap api.create_delivery_batch allows) would otherwise ship every
+ * one of those rows to the server component on every page view.  gives the
+ * footer its total without a second round trip.
+ */
+export const getDeliveriesPage = cache(async (companyId: string, query: DeliveryQuery): Promise<DeliveryPage> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return { rows: [], total: 0 };
+
+  const supabase = await createClient();
+  let builder = supabase
+    .schema("api")
+    .from("epi_deliveries")
+    .select(DELIVERY_COLUMNS, { count: "exact" })
+    .eq("company_id", companyId);
+
+  if (query.status) builder = builder.eq("status", query.status);
+
+  const needle = query.q?.trim();
+  if (needle) {
+    // PostgREST's `or=` filter is a comma/parenthesis-delimited grammar, so those
+    // characters (and the LIKE wildcards) are stripped rather than escaped -- a search box
+    // has no legitimate use for them, and letting them through would let a search term
+    // rewrite the filter.
+    const escaped = needle.replace(/[%_,().]/g, " ").trim();
+    if (escaped) {
+      // A CA number lives on the items, not on the delivery, so the item hits are resolved
+      // first and folded into the same filter as the name match. Capped: a search that
+      // matched thousands of deliveries is not a search anyone is reading.
+      const { data: itemRows } = await supabase
+        .schema("api")
+        .from("epi_delivery_items")
+        .select("delivery_id")
+        .eq("company_id", companyId)
+        .ilike("ca_number", `%${escaped}%`)
+        .limit(500);
+
+      const ids = [...new Set(((itemRows ?? []) as { delivery_id: string }[]).map((r) => r.delivery_id))];
+      builder = ids.length
+        ? builder.or(`employee_full_name.ilike.%${escaped}%,id.in.(${ids.join(",")})`)
+        : builder.ilike("employee_full_name", `%${escaped}%`);
+    }
+  }
+
+  const { data, error, count } = await builder
+    .order("created_at", { ascending: false })
+    .range(query.offset, query.offset + query.limit - 1);
+
+  if (error || !data) return { rows: [], total: 0 };
+
+  return { rows: (data as DeliveryRow[]).map(mapDeliveryRow), total: count ?? 0 };
+});
+
+/** How many deliveries a company has in each status -- what the filter pills count. Five
+ * head-only counts, so no row ever leaves Postgres for this. */
+export const getDeliveryStatusCounts = cache(
+  async (companyId: string): Promise<{ total: number; byStatus: Record<DeliveryStatus, number> }> => {
+    const session = await verifySession();
+    const empty = {
+      DRAFT: 0, ISSUED: 0, CONFIRMED: 0, CONTESTED: 0, CANCELLED: 0, SUPERSEDED: 0,
+    } as Record<DeliveryStatus, number>;
+    if (!session.isAuthenticated) return { total: 0, byStatus: empty };
+
+    const supabase = await createClient();
+    const statuses: DeliveryStatus[] = ["DRAFT", "ISSUED", "CONFIRMED", "CONTESTED", "CANCELLED", "SUPERSEDED"];
+
+    const [totalResult, ...results] = await Promise.all([
+      supabase.schema("api").from("epi_deliveries").select("id", { count: "exact", head: true }).eq("company_id", companyId),
+      ...statuses.map((status) =>
+        supabase
+          .schema("api")
+          .from("epi_deliveries")
+          .select("id", { count: "exact", head: true })
+          .eq("company_id", companyId)
+          .eq("status", status),
+      ),
+    ]);
+
+    const byStatus = { ...empty };
+    statuses.forEach((status, index) => {
+      byStatus[status] = results[index]?.count ?? 0;
+    });
+    return { total: totalResult.count ?? 0, byStatus };
+  },
+);
+
+/** Deliveries of ONE employee, newest first -- served by deliveries_emp_idx. The employee
+ * detail page and the ficha need this and nothing else; both used to read the whole
+ * company's deliveries and filter in JS. */
+export const getEmployeeDeliveries = cache(async (employeeId: string): Promise<Delivery[]> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .from("epi_deliveries")
+    .select(DELIVERY_COLUMNS)
+    .eq("employee_id", employeeId)
+    .order("delivery_date", { ascending: false });
+
+  if (error || !data) return [];
+
+  return (data as DeliveryRow[]).map(mapDeliveryRow);
+});
+
+/** The longest-waiting unconfirmed deliveries -- the dashboard names three of these. Bounded
+ * by  in Postgres rather than by sorting the whole table in JS. */
+export const getOldestWaitingDeliveries = cache(
+  async (companyId: string, limit: number = 3): Promise<Delivery[]> => {
+    const session = await verifySession();
+    if (!session.isAuthenticated) return [];
+
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .schema("api")
+      .from("epi_deliveries")
+      .select(DELIVERY_COLUMNS)
+      .eq("company_id", companyId)
+      .eq("status", "ISSUED")
+      .not("issued_at", "is", null)
+      .order("issued_at", { ascending: true })
+      .limit(limit);
+
+    if (error || !data) return [];
+
+    return (data as DeliveryRow[]).map(mapDeliveryRow);
+  },
+);
+
+/**
+ * How many deliveries each employee of a company has, as a map.
+ *
+ * Selects ONLY employee_id, so this is one narrow column rather than the whole delivery
+ * row -- but it is still one row per delivery, and that is a deliberate stopping point: a
+ * proper GROUP BY needs an RPC, which needs a migration. Revisit when the roster column
+ * actually hurts.
+ */
+export const getDeliveryCountsByEmployee = cache(async (companyId: string): Promise<Map<string, number>> => {
+  const session = await verifySession();
+  const counts = new Map<string, number>();
+  if (!session.isAuthenticated) return counts;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .from("epi_deliveries")
+    .select("employee_id")
+    .eq("company_id", companyId);
+
+  if (error || !data) return counts;
+
+  for (const row of data as { employee_id: string }[]) {
+    counts.set(row.employee_id, (counts.get(row.employee_id) ?? 0) + 1);
+  }
+  return counts;
+});
+
 /** A single delivery by id, or null if it doesn't exist or isn't visible (RLS). */
 export const getDelivery = cache(async (deliveryId: string): Promise<Delivery | null> => {
   const session = await verifySession();
@@ -564,21 +745,23 @@ export const getDeliveryItems = cache(async (deliveryId: string): Promise<Delive
 });
 
 /**
- * Every line item of every delivery in one company, in a single round trip.
- * The deliveries list shows an items column per row and the dashboard names the
- * EPI somebody is still waiting on, and both would otherwise be one getDeliveryItems()
- * query per delivery. Callers index this by deliveryId themselves.
+ * Line items for a known set of deliveries, in one round trip.
+ *
+ * Callers show an items column beside deliveries they are already rendering, so the set is
+ * whatever is on screen -- a page of rows, or one employee's history. This deliberately
+ * takes ids rather than a company: the earlier company-wide version pulled every item the
+ * company had ever recorded in order to annotate seven table rows.
  */
-export const getCompanyDeliveryItems = cache(async (companyId: string): Promise<DeliveryItem[]> => {
+export const getDeliveryItemsFor = cache(async (deliveryIds: readonly string[]): Promise<DeliveryItem[]> => {
   const session = await verifySession();
-  if (!session.isAuthenticated) return [];
+  if (!session.isAuthenticated || deliveryIds.length === 0) return [];
 
   const supabase = await createClient();
   const { data, error } = await supabase
     .schema("api")
     .from("epi_delivery_items")
     .select(DELIVERY_ITEM_COLUMNS)
-    .eq("company_id", companyId)
+    .in("delivery_id", deliveryIds as string[])
     .order("line_no", { ascending: true });
 
   if (error || !data) return [];
@@ -595,7 +778,7 @@ export type DeliveryItemSummary = {
   firstEpiName: string;
 };
 
-/** Indexes getCompanyDeliveryItems() output by delivery. */
+/** Indexes getDeliveryItemsFor() output by delivery. */
 export function summarizeDeliveryItems(items: DeliveryItem[]): Map<string, DeliveryItemSummary> {
   const byDelivery = new Map<string, DeliveryItemSummary>();
   for (const item of items) {

@@ -8,6 +8,7 @@ import { StatItem } from "@/components/stat-item";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary } from "@/i18n/dictionaries";
 import { ResendBatchPanel } from "./resend-panel";
+import { formatDayBr } from "@/lib/format/datetime";
 
 export default async function DeliveryBatchPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await verifySession();
@@ -30,7 +31,7 @@ export default async function DeliveryBatchPage({ params }: { params: Promise<{ 
     <main className="flex flex-1 flex-col gap-6 p-4 md:p-8">
       <div>
         <h1 className="font-heading text-4xl font-extrabold tracking-tight">
-          {t.deliveries.batchOfPrefix} {new Date(`${batch.deliveryDate}T00:00:00`).toLocaleDateString("pt-BR")}
+          {t.deliveries.batchOfPrefix} {formatDayBr(batch.deliveryDate)}
         </h1>
         <Link
           href="/deliveries/batches"

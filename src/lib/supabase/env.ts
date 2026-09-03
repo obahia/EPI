@@ -22,6 +22,10 @@ export function getSupabasePublishableKey(): string {
   return required("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
 }
 
-export function getSupabaseSecretKey(): string {
-  return required("SUPABASE_SECRET_KEY");
-}
+// No getSupabaseSecretKey() here on purpose. Both src/lib/supabase/server.ts and
+// client.ts say explicitly that the secret key (RLS-bypassing) is reserved for a future
+// admin/cross-tenant client that FASE 3+ never actually built -- every real query in this
+// app goes through the publishable key plus the caller's own session, with RLS enforcing
+// tenancy. A getter with no caller is still a secret loaded into every environment for
+// nothing; add it back here, next to the client that will actually call it, if that
+// admin path is ever built.

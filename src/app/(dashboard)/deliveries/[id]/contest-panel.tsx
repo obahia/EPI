@@ -4,9 +4,10 @@ import { getLocale } from "@/i18n/get-locale";
 import { getDictionary } from "@/i18n/dictionaries";
 import { contestReasonLabel } from "./labels";
 import { ResolveContestForm } from "./resolve-contest-form";
+import { formatDateTimeBr } from "@/lib/format/datetime";
 
 function fmt(value: string): string {
-  return new Date(value).toLocaleString("pt-BR");
+  return formatDateTimeBr(value);
 }
 
 /** Only rendered when the delivery has at least one contest. Unresolved contests get an

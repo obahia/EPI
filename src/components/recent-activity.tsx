@@ -4,6 +4,7 @@ import { Panel, PanelTitle } from "@/components/panel";
 import type { AuditEvent } from "@/lib/supabase/dal";
 import { auditEventLabel } from "@/app/(dashboard)/deliveries/[id]/labels";
 import type { Dict } from "@/i18n/dictionaries";
+import { formatDateTimeBr } from "@/lib/format/datetime";
 
 /**
  * The company-wide activity feed, implemented from the mockup: one round icon per
@@ -15,11 +16,15 @@ import type { Dict } from "@/i18n/dictionaries";
 export function RecentActivity({
   events,
   historyHref,
+  timeZone,
   t,
   className,
 }: {
   events: AuditEvent[];
   historyHref: string;
+  /** The company's own IANA zone (Company.timeZone) -- falls back to Brasília time in
+   * formatDateTimeBr when null/undefined. */
+  timeZone?: string | null;
   t: Dict;
   className?: string;
 }) {
@@ -46,7 +51,7 @@ export function RecentActivity({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[14px] font-bold">{auditEventLabel(t, event.eventType)}</p>
                 <p className="text-[12.5px] text-muted-foreground">
-                  {new Date(event.createdAt).toLocaleString("pt-BR")}
+                  {formatDateTimeBr(event.createdAt, timeZone)}
                 </p>
               </div>
               <span

@@ -1,12 +1,15 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { verifySession, getEmployee, getDeliveries, type EmployeeStatus } from "@/lib/supabase/dal";
+import { verifySession, getEmployee, getEmployeeDeliveries, type EmployeeStatus } from "@/lib/supabase/dal";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
 import { Panel, PanelKicker, PanelTitle } from "@/components/panel";
 import { formatPhoneBr } from "@/lib/br/phone";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary, type Dict } from "@/i18n/dictionaries";
 import { EmployeeEditForm } from "./employee-edit-form";
+import { formatDayBr } from "@/lib/format/datetime";
 
 function statusLabel(t: Dict, status: EmployeeStatus): string {
   const map: Record<EmployeeStatus, string> = {
@@ -30,8 +33,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
     notFound();
   }
 
-  const deliveries = await getDeliveries(employee.companyId);
-  const mine = deliveries.filter((d) => d.employeeId === employee.id);
+  const mine = await getEmployeeDeliveries(employee.id);
   const awaiting = mine.filter((d) => d.status === "ISSUED").length;
 
   return (
@@ -53,6 +55,11 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
         subtitle={`${t.employees.cpfLabel} ${employee.cpfMasked}${
           employee.registrationNumber ? ` · ${t.employees.registrationNumberLabel} ${employee.registrationNumber}` : ""
         }`}
+        actions={
+          <Button asChild variant="outline" size="lg">
+            <Link href={`/ficha/${employee.id}`}>{t.employees.epiControlSheet}</Link>
+          </Button>
+        }
       />
 
       {/* Two columns from `xl` up, the same way the delivery detail is laid out: what you
@@ -90,7 +97,7 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
               {employee.terminatedOn ? (
                 <Fact
                   label={t.employees.terminatedOnLabel}
-                  value={new Date(`${employee.terminatedOn}T00:00:00`).toLocaleDateString("pt-BR")}
+                  value={formatDayBr(employee.terminatedOn)}
                 />
               ) : null}
             </dl>

@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { hashWorkerToken } from "@/lib/crypto/worker-token";
 import { createWorkerClient } from "@/lib/supabase/worker-client";
 import { ReviewForm } from "./review-form";
@@ -46,11 +46,17 @@ export default async function WorkerReviewPage({ params }: { params: Promise<{ i
     return <InvalidNotice />;
   }
 
+  // Same header the redirect route reads (src/app/e/[token]/route.ts) -- this render is a
+  // real call to worker.open_link too (nonce reissue on every load), and until this fix it
+  // passed null here, so a device that opened the link straight to this page rather than
+  // through the redirect logged no IP at all against its LINK_VIEWED event.
+  const clientIp = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || null;
+
   const tokenHashB64 = hashWorkerToken(token).toString("base64");
   const supabase = createWorkerClient();
   const { data, error } = await supabase
     .schema("worker")
-    .rpc("open_link", { p_token_hash_b64: tokenHashB64, p_client_ip: null })
+    .rpc("open_link", { p_token_hash_b64: tokenHashB64, p_client_ip: clientIp })
     .single();
 
   if (error || !data) {

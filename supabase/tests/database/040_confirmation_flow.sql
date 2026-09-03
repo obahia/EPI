@@ -167,6 +167,29 @@ select is(
   'confirmation_requests row is VIEWED after the anon open_link call'
 );
 
+-- Audit finding OBS-01: open_link is handed p_client_ip and must persist it into the
+-- LINK_VIEWED event's data, not just use it for rate limiting and drop it.
+do $$
+declare v_hash_b64 text; v_status text;
+begin
+  select extra into v_hash_b64 from fixture_ids where label = 'cr';
+
+  set local role anon;
+  select view_status into v_status from worker.open_link(v_hash_b64, '203.0.113.7'::inet);
+  reset role;
+end $$;
+
+select is(
+  (
+    select data->>'client_ip'
+    from audit.audit_events
+    where entity_id = (select id from fixture_ids where label = 'cr') and event_type = 'LINK_VIEWED'
+    order by seq desc limit 1
+  ),
+  '203.0.113.7',
+  'the most recent LINK_VIEWED event carries the client IP it was opened from'
+);
+
 -- Wrong identity attempt: returns normally (not an exception) with IDENTITY_MISMATCH, and
 -- persists the IDENTITY_FAILED transition + incremented attempt count -- this is the exact
 -- bug class fixed during local PGlite testing (an uncaught RAISE would have rolled the

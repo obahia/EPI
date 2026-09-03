@@ -22,6 +22,7 @@ import { ContestPanel } from "./contest-panel";
 import { AuditTimeline } from "./audit-timeline";
 import { SealedReceipt } from "./sealed-receipt";
 import { LIVE_CONFIRMATION_STATUSES } from "./labels";
+import { formatDateTimeBr, formatDayBr } from "@/lib/format/datetime";
 
 export default async function DeliveryPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await verifySession();
@@ -61,11 +62,11 @@ export default async function DeliveryPage({ params }: { params: Promise<{ id: s
     : false;
 
   const subtitle = [
-    `${t.deliveries.deliveryOfPrefix} ${new Date(`${delivery.deliveryDate}T00:00:00`).toLocaleDateString("pt-BR")}`,
+    `${t.deliveries.deliveryOfPrefix} ${formatDayBr(delivery.deliveryDate)}`,
     batch
-      ? `${t.deliveries.batchColumn.toLowerCase()} ${new Date(`${batch.deliveryDate}T00:00:00`).toLocaleDateString("pt-BR")}${batch.note?.trim() ? ` ${batch.note.trim()}` : ""}`
+      ? `${t.deliveries.batchColumn.toLowerCase()} ${formatDayBr(batch.deliveryDate)}${batch.note?.trim() ? ` ${batch.note.trim()}` : ""}`
       : null,
-    delivery.issuedAt ? `${t.deliveries.issuedOn} ${new Date(delivery.issuedAt).toLocaleString("pt-BR")}` : null,
+    delivery.issuedAt ? `${t.deliveries.issuedOn} ${formatDateTimeBr(delivery.issuedAt)}` : null,
   ]
     .filter(Boolean)
     .join(" · ");

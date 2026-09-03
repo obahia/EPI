@@ -9,6 +9,8 @@ const pt = {
     tagline: "Prova de entrega de EPI, selada.",
   },
   common: {
+    previous: "Anterior",
+    next: "Próxima",
     action: "Ação",
     view: "Ver",
     save: "Salvar",
@@ -165,6 +167,7 @@ const pt = {
     nothingPendingHint: "Todas as entregas emitidas já foram respondidas.",
   },
   employees: {
+    epiControlSheet: "Ficha de EPI",
     recordTitle: "Ficha",
     statusHint: "Marcar como desligado impede que novas entregas sejam emitidas para esta pessoa.",
     cpfNotEditableHint: "O CPF é guardado cifrado e não pode ser editado aqui.",
@@ -541,6 +544,8 @@ const en: typeof pt = {
     tagline: "Sealed proof of PPE delivery.",
   },
   common: {
+    previous: "Previous",
+    next: "Next",
     action: "Action",
     view: "View",
     save: "Save",
@@ -697,6 +702,7 @@ const en: typeof pt = {
     nothingPendingHint: "Every issued delivery has been answered.",
   },
   employees: {
+    epiControlSheet: "PPE control sheet",
     recordTitle: "Record",
     statusHint: "Marking someone as terminated stops new deliveries from being issued to them.",
     cpfNotEditableHint: "The CPF is stored encrypted and cannot be edited here.",

@@ -5,7 +5,7 @@ import {
   verifySession,
   getMyCompanies,
   getEmployees,
-  getDeliveries,
+  getDeliveryCountsByEmployee,
   type Employee,
   type EmployeeStatus,
 } from "@/lib/supabase/dal";
@@ -41,9 +41,9 @@ export default async function EmployeesPage({
 
   const { company: companyParam, status, q } = await searchParams;
   const activeCompany = companies.find((c) => c.id === companyParam) ?? companies[0]!;
-  const [employees, deliveries] = await Promise.all([
+  const [employees, deliveryCounts] = await Promise.all([
     getEmployees(activeCompany.id),
-    getDeliveries(activeCompany.id),
+    getDeliveryCountsByEmployee(activeCompany.id),
   ]);
 
   const countOf = (status: EmployeeStatus) => employees.filter((e) => e.status === status).length;
@@ -68,7 +68,7 @@ export default async function EmployeesPage({
       <EmployeeRoster
         companyId={activeCompany.id}
         employees={employees}
-        deliveries={deliveries}
+        deliveryCounts={deliveryCounts}
         status={status}
         q={q}
         t={t}
@@ -95,14 +95,14 @@ function statusLabel(t: Dict, status: EmployeeStatus): string {
 function EmployeeRoster({
   companyId,
   employees,
-  deliveries,
+  deliveryCounts,
   status,
   q,
   t,
 }: {
   companyId: string;
   employees: Employee[];
-  deliveries: { employeeId: string; status: string }[];
+  deliveryCounts: Map<string, number>;
   status?: string;
   q?: string;
   t: Dict;
@@ -113,11 +113,6 @@ function EmployeeRoster({
         <EmptyState icon={Users} message={t.employees.noEmployeesYet} />
       </Panel>
     );
-  }
-
-  const deliveriesByEmployee = new Map<string, number>();
-  for (const delivery of deliveries) {
-    deliveriesByEmployee.set(delivery.employeeId, (deliveriesByEmployee.get(delivery.employeeId) ?? 0) + 1);
   }
 
   const activeStatus = STATUSES.find((s) => s === status);
@@ -182,7 +177,7 @@ function EmployeeRoster({
                 <EmployeeRow
                   key={employee.id}
                   employee={employee}
-                  deliveries={deliveriesByEmployee.get(employee.id) ?? 0}
+                  deliveries={deliveryCounts.get(employee.id) ?? 0}
                   t={t}
                 />
               ))}

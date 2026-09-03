@@ -6,8 +6,8 @@ import {
   getCompany,
   getDashboardSummary,
   getCompanyAuditEvents,
-  getDeliveries,
-  getCompanyDeliveryItems,
+  getOldestWaitingDeliveries,
+  getDeliveryItemsFor,
   summarizeDeliveryItems,
 } from "@/lib/supabase/dal";
 import { Button } from "@/components/ui/button";
@@ -40,24 +40,21 @@ export default async function CompanyDashboardPage({ params }: { params: Promise
 
   const t = getDictionary(await getLocale());
   const { id } = await params;
-  const [company, summary, auditEvents, deliveries, items] = await Promise.all([
+  // Longest-waiting first: bounded to 3 rows in Postgres (deliveries_board_idx serves the
+  // `status = ISSUED order by issued_at` shape) rather than sorting the company's whole
+  // delivery history in JS for a right-hand column that only ever names three people.
+  const [company, summary, auditEvents, oldestWaiting] = await Promise.all([
     getCompany(id),
     getDashboardSummary(id),
     getCompanyAuditEvents(id, 8),
-    getDeliveries(id),
-    getCompanyDeliveryItems(id),
+    getOldestWaitingDeliveries(id, 3),
   ]);
   if (!company) {
     notFound();
   }
 
+  const items = await getDeliveryItemsFor(oldestWaiting.map((d) => d.id));
   const itemsByDelivery = summarizeDeliveryItems(items);
-
-  // Longest-waiting first: the right-hand column names these three instead of counting them.
-  const oldestWaiting = deliveries
-    .filter((d) => d.status === "ISSUED" && d.issuedAt)
-    .sort((a, b) => new Date(a.issuedAt!).getTime() - new Date(b.issuedAt!).getTime())
-    .slice(0, 3);
 
   const pendingHref = `/deliveries?company=${company.id}&status=ISSUED`;
 
@@ -110,7 +107,7 @@ export default async function CompanyDashboardPage({ params }: { params: Promise
             <EmptyState icon={Activity} message={t.companies.noActivityYet} />
           </Panel>
         ) : (
-          <RecentActivity events={auditEvents} historyHref={`/deliveries?company=${company.id}`} t={t} />
+          <RecentActivity events={auditEvents} historyHref={`/deliveries?company=${company.id}`} timeZone={company.timeZone} t={t} />
         )}
         <NeedsAttention
           deliveries={oldestWaiting}

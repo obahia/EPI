@@ -1,6 +1,7 @@
 import { createWorkerClient } from "@/lib/supabase/worker-client";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatDateTimeBr } from "@/lib/format/datetime";
 
 type VerifyResultRow = {
   verification_code: string;
@@ -47,7 +48,7 @@ export default async function VerifyPage({ params }: { params: Promise<{ code: s
               </div>
               <div>
                 <dt className="text-xs text-muted-foreground">Selado em</dt>
-                <dd>{new Date(result.sealed_at).toLocaleString("pt-BR")}</dd>
+                <dd>{formatDateTimeBr(result.sealed_at)}</dd>
               </div>
               <div>
                 <dt className="text-xs text-muted-foreground">Início do hash</dt>

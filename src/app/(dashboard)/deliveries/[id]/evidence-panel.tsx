@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { EvidenceSummary } from "@/lib/supabase/dal";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary } from "@/i18n/dictionaries";
+import { formatDateTimeBr } from "@/lib/format/datetime";
 
 /**
  * Manager-facing summary of the sealed evidence for a CONFIRMED delivery -- the code, the
@@ -26,7 +27,7 @@ export async function EvidencePanel({ evidence }: { evidence: EvidenceSummary })
           </div>
           <div className="contents">
             <dt className="text-muted-foreground">{t.deliveries.sealedAtLabel}</dt>
-            <dd>{new Date(evidence.sealedAt).toLocaleString("pt-BR")}</dd>
+            <dd>{formatDateTimeBr(evidence.sealedAt)}</dd>
           </div>
           <div className="contents">
             <dt className="text-muted-foreground">{t.deliveries.hashStartLabel}</dt>

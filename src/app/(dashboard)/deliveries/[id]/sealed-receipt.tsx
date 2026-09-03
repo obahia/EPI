@@ -3,6 +3,7 @@ import type { Delivery, EvidenceSummary } from "@/lib/supabase/dal";
 import { SealMark } from "@/components/seal-mark";
 import { Button } from "@/components/ui/button";
 import type { Dict } from "@/i18n/dictionaries";
+import { formatDateTimeBr } from "@/lib/format/datetime";
 
 /**
  * The sealed receipt, implemented from the Selo Desktop redesign's comprovante
@@ -40,7 +41,7 @@ export function SealedReceipt({
             {delivery.employeeFullName}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {t.deliveries.sealedAtLabel}: {new Date(evidence.sealedAt).toLocaleString("pt-BR")}
+            {t.deliveries.sealedAtLabel}: {formatDateTimeBr(evidence.sealedAt)}
           </p>
         </div>
         <SealMark className="size-19" />

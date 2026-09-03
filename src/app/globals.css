@@ -158,8 +158,39 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Installed on a phone the app runs edge to edge (viewport-fit=cover), so the home
+       indicator would otherwise sit on top of the last row of a table. Zero in every
+       context that has no inset, so it costs nothing on desktop. */
+    padding-bottom: env(safe-area-inset-bottom);
   }
   html {
     @apply font-sans;
+  }
+}
+
+/* Printed documents. Only the ficha de controle de EPI uses this today: it is a legal
+   form that has to land on A4 with real margins, and nothing else in the app is meant
+   to be printed. Kept out of the token blocks above because it is page setup, not theme. */
+@page {
+  size: A4;
+  margin: 14mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff;
+    color: #111;
+  }
+  .ficha {
+    max-width: none;
+  }
+  /* A row of the delivery table must not be split across two sheets -- half a receipt
+     line at a page break is exactly the kind of thing a fiscal queries. */
+  .ficha tr {
+    break-inside: avoid;
+  }
+  .ficha thead {
+    display: table-header-group;
   }
 }

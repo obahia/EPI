@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Panel, PanelKicker } from "@/components/panel";
 import { useT } from "@/i18n/provider";
 import { createConfirmationLink, type ConfirmationLinkState } from "../actions";
+import { formatDateTimeBr } from "@/lib/format/datetime";
 
 const initialState: ConfirmationLinkState = { error: null, path: null, expiresAt: null };
 
@@ -105,7 +106,7 @@ export function ConfirmationLinkPanel({ deliveryId, hasLiveLink }: { deliveryId:
               {state.expiresAt ? (
                 <>
                   {" "}
-                  {t.deliveries.expiresAtPrefix} {new Date(state.expiresAt).toLocaleString("pt-BR")}.
+                  {t.deliveries.expiresAtPrefix} {formatDateTimeBr(state.expiresAt)}.
                 </>
               ) : null}
             </p>

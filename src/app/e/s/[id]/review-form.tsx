@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { submitConfirm, submitContest, type ConfirmState, type ContestState } from "./actions";
+import { formatDayBr } from "@/lib/format/datetime";
 
 type Item = { epi_name: string; ca_number: string; manufacturer: string | null; model: string | null; quantity: number; unit: string };
 
@@ -79,7 +80,7 @@ export function ReviewForm({
         <CardHeader>
           <CardTitle className="text-base">{employeeFullName}</CardTitle>
           <CardDescription>
-            Entrega de {new Date(`${deliveryDate}T00:00:00`).toLocaleDateString("pt-BR")}
+            Entrega de {formatDayBr(deliveryDate)}
             {note ? ` — ${note}` : ""}
           </CardDescription>
         </CardHeader>
