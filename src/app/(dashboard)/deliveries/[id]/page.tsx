@@ -28,7 +28,7 @@ import { AuditTimeline } from "./audit-timeline";
 import { SealedReceipt } from "./sealed-receipt";
 import { ReturnItemForm } from "./return-item-form";
 import { ReplaceDeliveryForm } from "./replace-delivery-form";
-import { LIVE_CONFIRMATION_STATUSES, epiReturnReasonLabel } from "./labels";
+import { LIVE_CONFIRMATION_STATUSES, epiReturnConditionLabel, epiReturnReasonLabel } from "./labels";
 import { formatDateTimeBr, formatDayBr } from "@/lib/format/datetime";
 
 /** Whole days since a delivery was confirmed -- the impure Date.now() call lives in its own
@@ -71,6 +71,11 @@ export default async function DeliveryPage({ params }: { params: Promise<{ id: s
   // original -- gates both the button below and the extra catalog fetch it needs, so a
   // DRAFT/ISSUED/CANCELLED/SUPERSEDED delivery never pays for epis/variants it can't use.
   const canReplace = delivery.status === "CONFIRMED" || delivery.status === "CONTESTED";
+
+  // api.return_epi_item accepts CONFIRMED or SUPERSEDED -- a superseded delivery (its item
+  // was replaced by a troca) is exactly the devolução-obrigatória case spec §9 describes,
+  // not a state where returning should become impossible.
+  const canReturn = delivery.status === "CONFIRMED" || delivery.status === "SUPERSEDED";
 
   // The mockup's subtitle names the batch the delivery came out of; a one-off delivery
   // has no batch and simply drops that clause. company is only knowable once delivery
@@ -174,7 +179,7 @@ export default async function DeliveryPage({ params }: { params: Promise<{ id: s
                     <TableHead>{t.epis.modelLabel}</TableHead>
                     <TableHead className="text-right">{t.deliveries.quantityColumnAbbr}</TableHead>
                     <TableHead>{t.deliveries.unitColumnAbbr}</TableHead>
-                    {delivery.status === "CONFIRMED" ? (
+                    {canReturn ? (
                       <TableHead className="text-right">{t.deliveries.returnColumn}</TableHead>
                     ) : null}
                   </TableRow>
@@ -190,12 +195,15 @@ export default async function DeliveryPage({ params }: { params: Promise<{ id: s
                         <TableCell className="text-muted-foreground">{item.model ?? "—"}</TableCell>
                         <TableCell className="text-right tabular-nums">{item.quantity}</TableCell>
                         <TableCell className="text-muted-foreground">{UNIT_LABEL[item.unit] ?? item.unit}</TableCell>
-                        {delivery.status === "CONFIRMED" ? (
+                        {canReturn ? (
                           <TableCell className="text-right">
                             {itemReturn ? (
                               <span className="text-[12.5px] text-muted-foreground">
                                 {t.deliveries.returnedOnPrefix} {formatDayBr(itemReturn.returnedOn)} ·{" "}
                                 {epiReturnReasonLabel(t)[itemReturn.reasonCode]}
+                                {itemReturn.conditionCode
+                                  ? ` · ${t.deliveries.returnedConditionPrefix} ${epiReturnConditionLabel(t)[itemReturn.conditionCode]}`
+                                  : ""}
                               </span>
                             ) : (
                               <ReturnItemForm deliveryId={delivery.id} deliveryItemId={item.id} />

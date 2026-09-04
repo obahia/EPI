@@ -353,6 +353,7 @@ export async function resolveContest(_prevState: ResolveContestState, formData: 
 export type RecordReturnState = { error: string | null };
 
 const RETURN_REASON_CODES = ["WORN_OUT", "REPLACED", "TERMINATION", "OTHER"] as const;
+const RETURN_CONDITION_CODES = ["REUSABLE", "DAMAGED", "DISCARDED", "OTHER"] as const;
 
 /**
  * Records a devolução (return) of one delivery line item via api.return_epi_item.
@@ -371,6 +372,7 @@ export async function recordEpiReturn(
     deliveryId: z.uuid(),
     returnedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, t.deliveries.invalidDate),
     reasonCode: z.enum(RETURN_REASON_CODES),
+    conditionCode: z.enum(RETURN_CONDITION_CODES),
     note: z.string().trim().max(2000).optional(),
   });
 
@@ -379,6 +381,7 @@ export async function recordEpiReturn(
     deliveryId: formData.get("deliveryId"),
     returnedOn: formData.get("returnedOn"),
     reasonCode: formData.get("reasonCode"),
+    conditionCode: formData.get("conditionCode"),
     note: formData.get("note") || undefined,
   });
   if (!parsed.success) {
@@ -394,6 +397,7 @@ export async function recordEpiReturn(
     p_returned_on: parsed.data.returnedOn,
     p_reason_code: parsed.data.reasonCode,
     p_note: parsed.data.note || null,
+    p_condition_code: parsed.data.conditionCode,
   });
 
   if (error) {

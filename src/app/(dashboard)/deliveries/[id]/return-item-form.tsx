@@ -16,12 +16,13 @@ import {
 import { cn } from "@/lib/utils";
 import { useT } from "@/i18n/provider";
 import { recordEpiReturn, type RecordReturnState } from "../actions";
-import type { EpiReturnReasonCode } from "@/lib/supabase/dal";
-import { epiReturnReasonLabel } from "./labels";
+import type { EpiReturnConditionCode, EpiReturnReasonCode } from "@/lib/supabase/dal";
+import { epiReturnConditionLabel, epiReturnReasonLabel } from "./labels";
 
 const initialState: RecordReturnState = { error: null };
 
 const REASON_CODES: EpiReturnReasonCode[] = ["WORN_OUT", "REPLACED", "TERMINATION", "OTHER"];
+const CONDITION_CODES: EpiReturnConditionCode[] = ["REUSABLE", "DAMAGED", "DISCARDED", "OTHER"];
 
 const selectClassName = cn(
   "h-11 w-full min-w-0 rounded-full border border-input bg-transparent px-4 text-sm outline-none",
@@ -41,7 +42,9 @@ export function ReturnItemForm({ deliveryId, deliveryItemId }: { deliveryId: str
   const [state, formAction, pending] = useActionState(recordEpiReturn, initialState);
   const [open, setOpen] = useState(false);
   const [reasonCode, setReasonCode] = useState<EpiReturnReasonCode>("WORN_OUT");
+  const [conditionCode, setConditionCode] = useState<EpiReturnConditionCode>("REUSABLE");
   const reasonLabel = epiReturnReasonLabel(t);
+  const conditionLabel = epiReturnConditionLabel(t);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -76,6 +79,23 @@ export function ReturnItemForm({ deliveryId, deliveryItemId }: { deliveryId: str
               {REASON_CODES.map((code) => (
                 <option key={code} value={code}>
                   {reasonLabel[code]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="conditionCode">{t.deliveries.returnConditionLabel}</Label>
+            <select
+              id="conditionCode"
+              name="conditionCode"
+              className={selectClassName}
+              value={conditionCode}
+              onChange={(e) => setConditionCode(e.target.value as EpiReturnConditionCode)}
+            >
+              {CONDITION_CODES.map((code) => (
+                <option key={code} value={code}>
+                  {conditionLabel[code]}
                 </option>
               ))}
             </select>

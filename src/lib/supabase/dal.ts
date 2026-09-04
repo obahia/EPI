@@ -1219,6 +1219,13 @@ export const getDeliveryContests = cache(async (deliveryId: string): Promise<Del
 
 export type EpiReturnReasonCode = "WORN_OUT" | "REPLACED" | "TERMINATION" | "OTHER";
 
+/** The item's physical condition on return (api.return_epi_item's p_condition_code) --
+ * distinct axis from EpiReturnReasonCode (why it came back). Only REUSABLE, when the
+ * organization has inventory_enabled, credits a DEVOLUCAO stock movement back to the
+ * employee's location bucket; DAMAGED/DISCARDED/OTHER never do. Nullable at the RPC level
+ * (older rows / callers that never send it), so the read side must handle null. */
+export type EpiReturnConditionCode = "REUSABLE" | "DAMAGED" | "DISCARDED" | "OTHER";
+
 /** One recorded devolução (return) of a single delivery line item -- manager-recorded
  * fact, no worker confirmation or sealed evidence (see the migration's own header comment,
  * 20260831200900_epi_returns.sql, for why this is intentionally lighter-weight than a
@@ -1230,6 +1237,7 @@ export type EpiReturn = {
   deliveryItemId: string;
   returnedOn: string;
   reasonCode: EpiReturnReasonCode;
+  conditionCode: EpiReturnConditionCode | null;
   note: string | null;
   createdBy: string;
   createdAt: string;
@@ -1242,13 +1250,14 @@ type EpiReturnRow = {
   delivery_item_id: string;
   returned_on: string;
   reason_code: EpiReturnReasonCode;
+  condition_code: EpiReturnConditionCode | null;
   note: string | null;
   created_by: string;
   created_at: string;
 };
 
 const EPI_RETURN_COLUMNS =
-  "id, company_id, delivery_id, delivery_item_id, returned_on, reason_code, note, created_by, created_at";
+  "id, company_id, delivery_id, delivery_item_id, returned_on, reason_code, condition_code, note, created_by, created_at";
 
 function mapEpiReturnRow(row: EpiReturnRow): EpiReturn {
   return {
@@ -1258,6 +1267,7 @@ function mapEpiReturnRow(row: EpiReturnRow): EpiReturn {
     deliveryItemId: row.delivery_item_id,
     returnedOn: row.returned_on,
     reasonCode: row.reason_code,
+    conditionCode: row.condition_code,
     note: row.note,
     createdBy: row.created_by,
     createdAt: row.created_at,

@@ -1,0 +1,26 @@
+-- Real bug found during live E2E closure-audit testing (second bug in the same area as
+-- 20260903140000_return_after_supersede_fix.sql): that migration used `create or replace
+-- function api.return_epi_item(... 5 params ...)`, but the ORIGINAL function only ever had
+-- 4 params (p_delivery_item_id, p_returned_on, p_reason_code, p_note). Postgres identifies
+-- a function by its full parameter list, so `create or replace` with a different arg count
+-- does not replace the old function at all -- it creates a SECOND, overloaded function
+-- alongside the untouched original (same lesson as the create_epi/create_employee arg-count
+-- gotcha already hit earlier this session, just missed here because the comment in that
+-- migration wrongly assumed the existing function already had 5 args).
+--
+-- Consequence, confirmed live: two overloads of api.return_epi_item coexisted (4-arg oid
+-- 18827 and 5-arg oid 18906). The app's Server Action calls the RPC with exactly 4 named
+-- params (deliveryItemId/returnedOn/reasonCode/note -- it does not yet send condition_code,
+-- a separate, still-open frontend gap). PostgREST resolved that 4-named-argument call to the
+-- OLD 4-arg function -- the one that still unconditionally rejects SUPERSEDED deliveries with
+-- delivery_not_confirmed -- silently ignoring the fix migration entirely. Reproduced live:
+-- clicking "Registrar devolução" on a SUPERSEDED delivery in the real epi-dev app failed with
+-- "Não foi possível registrar a devolução.", and a direct query against app.epi_returns
+-- confirmed zero rows were ever inserted.
+--
+-- Fix: drop the stale 4-arg overload outright. Only the 5-arg version (p_condition_code
+-- default null, CONFIRMED-or-SUPERSEDED check) remains -- no ambiguity left for PostgREST to
+-- resolve, and every existing caller (which never passes p_condition_code) keeps working
+-- identically since that parameter defaults to null.
+
+drop function if exists api.return_epi_item(uuid, date, text, text);

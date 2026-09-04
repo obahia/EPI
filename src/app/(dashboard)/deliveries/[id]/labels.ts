@@ -3,6 +3,7 @@ import type {
   AuditEvent,
   ConfirmationRequestStatus,
   DeliveryContest,
+  EpiReturnConditionCode,
   EpiReturnReasonCode,
 } from "@/lib/supabase/dal";
 import type { Dict } from "@/i18n/dictionaries";
@@ -64,6 +65,15 @@ export function epiReturnReasonLabel(t: Dict): Record<EpiReturnReasonCode, strin
     REPLACED: t.deliveries.returnReasonReplaced,
     TERMINATION: t.deliveries.returnReasonTermination,
     OTHER: t.deliveries.returnReasonOther,
+  };
+}
+
+export function epiReturnConditionLabel(t: Dict): Record<EpiReturnConditionCode, string> {
+  return {
+    REUSABLE: t.deliveries.returnConditionReusable,
+    DAMAGED: t.deliveries.returnConditionDamaged,
+    DISCARDED: t.deliveries.returnConditionDiscarded,
+    OTHER: t.deliveries.returnConditionOther,
   };
 }
 
