@@ -1628,6 +1628,198 @@ export const getEmployeeEpiLifecycle = cache(async (employeeId: string): Promise
   }));
 });
 
+// Phase D: compliance engine ---------------------------------------------------------------
+// See supabase/migrations/20260904000000_compliance_engine.sql -- the source of truth for
+// every RPC/column below. Unlike most DAL reads, these do NOT swallow errors to an empty
+// result: the frontend contract requires telling "feature disabled" and "no permission" apart
+// from "nothing to show", so every getX_ here returns a discriminated ComplianceResult
+// instead of a bare array.
+
+/** Per-requirement internal state -- maps deterministically to the 3-state external contract
+ * (CONFORME/ATENÇÃO/NÃO CONFORME) plus OPCIONAL (required=false, never gates the aggregate)
+ * and SEM_CARGO/MATRIZ_VAZIA (indeterminate -- nothing was evaluable, never conforme nor não). */
+export type ComplianceRequirementState =
+  | "SEM_CARGO"
+  | "MATRIZ_VAZIA"
+  | "OPCIONAL"
+  | "NUNCA_ENTREGUE"
+  | "QUANTIDADE_INSUFICIENTE"
+  | "ITEM_VENCIDO"
+  | "PROXIMO_DA_TROCA"
+  | "OK";
+
+export type ComplianceAggregateState = "CONFORME" | "ATENCAO" | "NAO_CONFORME" | "INDETERMINADO";
+
+export type ComplianceAggregateReason =
+  | "SEM_CARGO"
+  | "MATRIZ_VAZIA"
+  | "SEM_REQUISITOS_OBRIGATORIOS"
+  | "REQUISITOS_PENDENTES"
+  | "PROXIMO_DA_TROCA"
+  | "OK";
+
+export type EmployeeComplianceRequirement = {
+  requirementId: string | null;
+  epiId: string | null;
+  epiName: string | null;
+  caNumber: string | null;
+  required: boolean | null;
+  requiredQuantity: number | null;
+  heldQuantity: number;
+  freshQuantity: number;
+  earliestDueDate: string | null;
+  state: ComplianceRequirementState;
+};
+
+type EmployeeComplianceRequirementRow = {
+  requirement_id: string | null;
+  epi_id: string | null;
+  epi_name: string | null;
+  ca_number: string | null;
+  required: boolean | null;
+  required_quantity: number | null;
+  held_quantity: number;
+  fresh_quantity: number;
+  earliest_due_date: string | null;
+  state: ComplianceRequirementState;
+};
+
+export type ComplianceSummary = {
+  aggregateState: ComplianceAggregateState;
+  aggregateReason: ComplianceAggregateReason;
+  requiredTotal: number;
+  requiredOk: number;
+  compliancePercent: number | null;
+};
+
+type ComplianceSummaryRow = {
+  aggregate_state: ComplianceAggregateState;
+  aggregate_reason: ComplianceAggregateReason;
+  required_total: number;
+  required_ok: number;
+  compliance_percent: number | null;
+};
+
+export type CompanyComplianceRow = ComplianceSummary & {
+  employeeId: string;
+  employeeFullName: string;
+  employeeStatus: EmployeeStatus;
+  positionId: string | null;
+  positionTitle: string | null;
+};
+
+type CompanyComplianceSummaryRow = ComplianceSummaryRow & {
+  employee_id: string;
+  employee_full_name: string;
+  employee_status: EmployeeStatus;
+  position_id: string | null;
+  position_title: string | null;
+};
+
+/** Every getX_compliance_ call below hits the same three failure shapes: not signed in / the
+ * row doesn't exist -> "not_found"; compliance.read missing on the company -> "forbidden"
+ * (42501); organizations.compliance_enabled is false -> "feature_disabled" (23514, message
+ * carries the literal string) -- never a fabricated compliant/non-compliant result. Anything
+ * else is "error". */
+export type ComplianceResult<T> =
+  | { status: "ok"; data: T }
+  | { status: "feature_disabled" }
+  | { status: "forbidden" }
+  | { status: "not_found" }
+  | { status: "error" };
+
+function classifyComplianceError(error: { code?: string; message?: string } | null): ComplianceResult<never> {
+  if (error?.code === "23514" && error.message?.includes("feature_disabled")) return { status: "feature_disabled" };
+  if (error?.code === "42501") return { status: "forbidden" };
+  if (error?.code === "P0002") return { status: "not_found" };
+  return { status: "error" };
+}
+
+/** Per-requirement compliance breakdown for one employee -- the ficha-360's "why" (spec §12).
+ * Requires compliance.read on the employee's company + the org's compliance_enabled flag. */
+export const getEmployeeComplianceDetail = cache(
+  async (employeeId: string): Promise<ComplianceResult<EmployeeComplianceRequirement[]>> => {
+    const session = await verifySession();
+    if (!session.isAuthenticated) return { status: "not_found" };
+
+    const supabase = await createClient();
+    const { data, error } = await supabase.schema("api").rpc("employee_compliance_detail", { p_employee_id: employeeId });
+    if (error) return classifyComplianceError(error);
+    if (!data) return { status: "error" };
+
+    return {
+      status: "ok",
+      data: (data as EmployeeComplianceRequirementRow[]).map((row) => ({
+        requirementId: row.requirement_id,
+        epiId: row.epi_id,
+        epiName: row.epi_name,
+        caNumber: row.ca_number,
+        required: row.required,
+        requiredQuantity: row.required_quantity,
+        heldQuantity: row.held_quantity,
+        freshQuantity: row.fresh_quantity,
+        earliestDueDate: row.earliest_due_date,
+        state: row.state,
+      })),
+    };
+  },
+);
+
+/** The single 3-state (+INDETERMINADO) aggregate for one employee. */
+export const getEmployeeComplianceSummary = cache(
+  async (employeeId: string): Promise<ComplianceResult<ComplianceSummary>> => {
+    const session = await verifySession();
+    if (!session.isAuthenticated) return { status: "not_found" };
+
+    const supabase = await createClient();
+    const { data, error } = await supabase.schema("api").rpc("employee_compliance_summary", { p_employee_id: employeeId });
+    if (error) return classifyComplianceError(error);
+    const row = (data as ComplianceSummaryRow[] | null)?.[0];
+    if (!row) return { status: "error" };
+
+    return {
+      status: "ok",
+      data: {
+        aggregateState: row.aggregate_state,
+        aggregateReason: row.aggregate_reason,
+        requiredTotal: row.required_total,
+        requiredOk: row.required_ok,
+        compliancePercent: row.compliance_percent,
+      },
+    };
+  },
+);
+
+/** One compliance aggregate row per employee of a company -- the dashboard's "% conformes" /
+ * "quem precisa de atenção" surface (spec §13), batched (no N+1). */
+export const getCompanyComplianceSummary = cache(
+  async (companyId: string): Promise<ComplianceResult<CompanyComplianceRow[]>> => {
+    const session = await verifySession();
+    if (!session.isAuthenticated) return { status: "not_found" };
+
+    const supabase = await createClient();
+    const { data, error } = await supabase.schema("api").rpc("company_compliance_summary", { p_company_id: companyId });
+    if (error) return classifyComplianceError(error);
+    if (!data) return { status: "error" };
+
+    return {
+      status: "ok",
+      data: (data as CompanyComplianceSummaryRow[]).map((row) => ({
+        employeeId: row.employee_id,
+        employeeFullName: row.employee_full_name,
+        employeeStatus: row.employee_status,
+        positionId: row.position_id,
+        positionTitle: row.position_title,
+        aggregateState: row.aggregate_state,
+        aggregateReason: row.aggregate_reason,
+        requiredTotal: row.required_total,
+        requiredOk: row.required_ok,
+        compliancePercent: row.compliance_percent,
+      })),
+    };
+  },
+);
+
 export type PendingReturn = {
   deliveryId: string;
   deliveryItemId: string;

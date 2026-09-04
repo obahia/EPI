@@ -13,6 +13,7 @@ import {
   getOrganizationPolicy,
   getStockBalances,
   getLocations,
+  getCompanyComplianceSummary,
   type StockBalance,
   type Location,
 } from "@/lib/supabase/dal";
@@ -24,6 +25,7 @@ import { RecentActivity } from "@/components/recent-activity";
 import { NeedsAttention } from "@/components/needs-attention";
 import { PendingReturns } from "@/components/pending-returns";
 import { LowStockPanel } from "@/components/low-stock-panel";
+import { ComplianceAttentionPanel } from "@/components/compliance-panel";
 import { StatItem } from "@/components/stat-item";
 import { EmptyState } from "@/components/empty-state";
 import { formatCnpj } from "@/lib/br/cnpj";
@@ -82,6 +84,28 @@ export default async function CompanyDashboardPage({ params }: { params: Promise
   const lowBalances = lowStockBalances.filter((b) => b.quantity <= LOW_STOCK_THRESHOLD);
   const locationNameById = new Map(locations.map((l) => [l.id, l.name]));
 
+  // Compliance: same on/off convention as inventoryEnabled -- when off, the RPC itself would
+  // refuse with feature_disabled, so this is skipped entirely rather than caught as an error.
+  const complianceEnabled = policy?.complianceEnabled ?? false;
+  const complianceResult = complianceEnabled ? await getCompanyComplianceSummary(company.id) : null;
+  const complianceRows =
+    complianceResult?.status === "ok"
+      ? complianceResult.data
+          .filter((row) => row.employeeStatus === "ACTIVE")
+          .filter((row) => row.aggregateState === "NAO_CONFORME" || row.aggregateState === "ATENCAO")
+          .sort((a, b) => (a.aggregateState === b.aggregateState ? 0 : a.aggregateState === "NAO_CONFORME" ? -1 : 1))
+      : [];
+  const complianceEvaluable =
+    complianceResult?.status === "ok"
+      ? complianceResult.data.filter((row) => row.employeeStatus === "ACTIVE" && row.aggregateState !== "INDETERMINADO")
+      : [];
+  const compliancePercentConforme =
+    complianceEvaluable.length > 0
+      ? Math.round(
+          (complianceEvaluable.filter((row) => row.aggregateState === "CONFORME").length / complianceEvaluable.length) * 100,
+        )
+      : null;
+
   const pendingHref = `/deliveries?company=${company.id}&status=ISSUED`;
   const stockHref = `/stock?company=${company.id}`;
 
@@ -121,6 +145,13 @@ export default async function CompanyDashboardPage({ params }: { params: Promise
             value={summary.contestedCount}
             hint={`${summary.cancelledCount} ${t.companies.cancelledLabel.toLowerCase()}`}
           />
+          {compliancePercentConforme !== null ? (
+            <StatItem
+              label={t.companies.percentConformeLabel}
+              value={`${compliancePercentConforme}%`}
+              tone={compliancePercentConforme === 100 ? "success" : undefined}
+            />
+          ) : null}
         </dl>
       ) : (
         <Panel>
@@ -148,6 +179,13 @@ export default async function CompanyDashboardPage({ params }: { params: Promise
         <PendingReturns returns={pendingReturns} timeZone={company.timeZone} t={t} />
         {inventoryEnabled ? (
           <LowStockPanel balances={lowBalances} locationNameById={locationNameById} stockHref={stockHref} t={t} />
+        ) : null}
+        {complianceEnabled ? (
+          <ComplianceAttentionPanel
+            rows={complianceRows}
+            employeeHref={(employeeId) => `/employees/${employeeId}`}
+            t={t}
+          />
         ) : null}
       </div>
     </main>

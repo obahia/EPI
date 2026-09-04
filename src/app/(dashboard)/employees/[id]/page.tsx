@@ -7,6 +7,8 @@ import {
   getJobPositions,
   getLocations,
   getEmployeeEpiLifecycle,
+  getEmployeeComplianceDetail,
+  getEmployeeComplianceSummary,
   type EmployeeStatus,
   type EmployeeEpiLifecycle,
 } from "@/lib/supabase/dal";
@@ -15,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/page-header";
 import { Panel, PanelKicker, PanelTitle } from "@/components/panel";
 import { EpiLifecycleBadge } from "@/components/epi-lifecycle-badge";
+import { CompliancePanel } from "@/components/compliance-panel";
 import { formatPhoneBr } from "@/lib/br/phone";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary, type Dict } from "@/i18n/dictionaries";
@@ -43,11 +46,13 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
     notFound();
   }
 
-  const [mine, positions, locations, lifecycle] = await Promise.all([
+  const [mine, positions, locations, lifecycle, complianceDetail, complianceSummary] = await Promise.all([
     getEmployeeDeliveries(employee.id),
     getJobPositions(employee.companyId),
     getLocations(employee.companyId),
     getEmployeeEpiLifecycle(employee.id),
+    getEmployeeComplianceDetail(employee.id),
+    getEmployeeComplianceSummary(employee.id),
   ]);
   const awaiting = mine.filter((d) => d.status === "ISSUED").length;
 
@@ -125,6 +130,8 @@ export default async function EmployeePage({ params }: { params: Promise<{ id: s
           </Panel>
         </div>
       </div>
+
+      <CompliancePanel detail={complianceDetail} summary={complianceSummary} t={t} />
 
       <Panel className="flex flex-col gap-4">
         <PanelTitle>{t.employees.lifecycleTitle}</PanelTitle>

@@ -13,7 +13,7 @@ export function StatItem({
   tone = "default",
 }: {
   label: string;
-  value: number;
+  value: number | string;
   hint?: string;
   tone?: "default" | "success";
 }) {
