@@ -197,6 +197,16 @@ async function scenarioReplacementRace(setup, adminId, companyId) {
   ]);
   const epiId = epi.rows[0].id;
 
+  // scenarioStockRace (run just before this, same company) already flipped
+  // inventory_enabled = true for this org -- so issue_delivery below will decrement real
+  // stock for THIS epi too, same as any other org with inventory on. Without this ENTRADA,
+  // the balance starts at 0 and issue_delivery fails with insufficient_stock before the
+  // actual replacement race is ever reached.
+  await asUser(setup, adminId, `select api.record_stock_movement($1, null, $2, null, 'ENTRADA', 1, 'estoque inicial', '{}')`, [
+    companyId,
+    epiId,
+  ]);
+
   const cpfHash = await setup.query(`select encode(extensions.digest('cpf-race-c', 'sha256'), 'base64') as v`);
   const cpfEnc = await setup.query(
     `select encode(decode('000000000000000000000000000000000000000000000000000000','hex') || 'fake-race-c'::bytea, 'base64') as v`,
