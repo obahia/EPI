@@ -408,6 +408,32 @@ select is(
 -- 7. PROXIMO_DA_TROCA (emp_due_soon: capacete due inside the org's 30-day alert window)
 -- ===========================================================================================
 
+-- Luva (60-day requirement periodicity) delivered TODAY, fresh -- a shared confirmed_at with
+-- capacete below would have pushed luva (shorter period) into ITEM_VENCIDO too, masking the
+-- one signal this test is actually about. Kept in its own delivery, its own fresh date.
+do $$
+declare
+  v_company uuid; v_employee uuid; v_delivery uuid;
+begin
+  select id into v_company from fixture_ids where label = 'company_p';
+  select id into v_employee from fixture_ids where label = 'emp_due_soon';
+  set local role authenticated;
+  perform set_config('request.jwt.claims', '{"sub":"dddddddd-dddd-dddd-dddd-dddddddddd01","role":"authenticated"}', true);
+
+  select api.create_delivery(
+    v_company, v_employee, current_date, null,
+    jsonb_build_array(jsonb_build_object('epi_id', (select id from fixture_ids where label = 'epi_luva'), 'quantity', 2))
+  ) into v_delivery;
+  perform api.issue_delivery(v_delivery);
+  insert into fixture_ids values ('delivery_due_soon_luva', v_delivery);
+  reset role;
+end $$;
+
+select set_config('app.transition_ok', (select id::text from fixture_ids where label = 'delivery_due_soon_luva'), true);
+update app.epi_deliveries
+set status = 'CONFIRMED', last_event = 'REQUEST_CONFIRMED', confirmed_at = clock_timestamp(), frozen_at = clock_timestamp()
+where id = (select id from fixture_ids where label = 'delivery_due_soon_luva');
+
 do $$
 declare
   v_company uuid; v_employee uuid; v_delivery uuid;
@@ -419,10 +445,7 @@ begin
 
   select api.create_delivery(
     v_company, v_employee, current_date - 65, null,
-    jsonb_build_array(
-      jsonb_build_object('epi_id', (select id from fixture_ids where label = 'epi_capacete'), 'quantity', 1),
-      jsonb_build_object('epi_id', (select id from fixture_ids where label = 'epi_luva'), 'quantity', 2)
-    )
+    jsonb_build_array(jsonb_build_object('epi_id', (select id from fixture_ids where label = 'epi_capacete'), 'quantity', 1))
   ) into v_delivery;
   perform api.issue_delivery(v_delivery);
   insert into fixture_ids values ('delivery_due_soon', v_delivery);
@@ -564,10 +587,13 @@ begin
   ) into v_delivery;
   perform api.issue_delivery(v_delivery);
   insert into fixture_ids values ('delivery_contest', v_delivery);
+  reset role;
 
   -- A real confirmation_requests + delivery_contests row (not a bare status flip) -- so
   -- api.resolve_contest, the actual product RPC, is what gets exercised below, not a fixture
-  -- shortcut standing in for it.
+  -- shortcut standing in for it. Both tables revoke INSERT from authenticated entirely
+  -- (manager-facing code never writes them directly) -- role reset above, back to the
+  -- unrestricted owner context every other raw-table fixture insert in this suite uses.
   insert into app.confirmation_requests (
     organization_id, company_id, delivery_id, token_hash, status, required_assurance_level,
     achieved_assurance_level, action_nonce, contested_at, frozen_at, expires_at
