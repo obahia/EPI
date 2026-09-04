@@ -68,7 +68,7 @@ async function main() {
     setup,
     adminId,
     `select company_id from api.onboard_organization($1, $2, $1, $2, null)`,
-    ['Concurrency Test LTDA', '10' + String(Date.now()).slice(-11)],
+    ['Concurrency Test LTDA', '10' + String(Date.now()).slice(-12)],
   );
   const companyId = onboard.rows[0].company_id;
   const orgRow = await setup.query('select organization_id from app.companies where id = $1', [companyId]);
