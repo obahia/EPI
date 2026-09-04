@@ -120,7 +120,11 @@ as $$
       when not reqs.required then 'OPCIONAL'
       when coalesce(agg.total_held, 0) = 0 then 'NUNCA_ENTREGUE'
       when agg.total_held < reqs.required_quantity then 'QUANTIDADE_INSUFICIENTE'
-      when agg.fresh_quantity < reqs.required_quantity then 'ITEM_VENCIDO'
+      -- coalesce is load-bearing: sum(...) filter(where ...) over zero qualifying rows
+      -- returns NULL, not 0 -- when EVERY held unit has expired, fresh_quantity is NULL
+      -- and "NULL < required_quantity" is unknown (treated as false by CASE), which would
+      -- silently fall through to OK instead of ITEM_VENCIDO. Found via real pgTAP in CI.
+      when coalesce(agg.fresh_quantity, 0) < reqs.required_quantity then 'ITEM_VENCIDO'
       when agg.earliest_fresh_due is not null
         and agg.earliest_fresh_due <= current_date + (select replacement_alert_days from org)
         then 'PROXIMO_DA_TROCA'

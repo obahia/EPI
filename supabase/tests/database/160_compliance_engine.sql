@@ -493,10 +493,14 @@ declare v_new_id uuid;
 begin
   set local role authenticated;
   perform set_config('request.jwt.claims', '{"sub":"dddddddd-dddd-dddd-dddd-dddddddddd01","role":"authenticated"}', true);
+  -- The original was confirmed moments ago (well inside its 90-day lifespan), so this troca
+  -- is early by definition -- the default 'warn' policy requires confirm_early=true plus a
+  -- real reason_note (already covered by 110_epi_lifecycle_troca.sql's own suite; not what
+  -- this test is about, so satisfied plainly here rather than left to fail).
   select api.create_replacement_delivery(
     (select id from fixture_ids where label = 'delivery_replace_orig'),
     jsonb_build_array(jsonb_build_object('epi_id', (select id from fixture_ids where label = 'epi_capacete'), 'quantity', 1)),
-    current_date, null, 'WEAR', null, false
+    current_date, null, 'WEAR', 'Teste de compliance: troca antecipada intencional para exercitar o gap.', true
   ) into v_new_id;
   insert into fixture_ids values ('delivery_replace_new', v_new_id);
   reset role;
