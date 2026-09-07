@@ -146,49 +146,69 @@ select ok(
 -- ===========================================================================================
 -- 2. Runtime guards: unimplemented factor type, provider, metadata denylist, non-PASS
 -- ===========================================================================================
+-- worker.finish_confirmation consumes the action_nonce BEFORE it validates factors, so every
+-- rejected call below burns its nonce and the next one must re-open the link for a fresh one
+-- (open_link reissues action_nonce on every call). The nonce also has to travel base64 --
+-- that is what open_link returns and what the RPC decodes; passing the raw bytea's text form
+-- would fail as stale_submission long before reaching the guard under test.
 
+insert into fixture_ids values ('nonce_fresh', null, null);
+
+create or replace function pg_temp.refresh_nonce() returns void language plpgsql as $$
+declare v_nonce text;
+begin
+  set local role anon;
+  select action_nonce into v_nonce from worker.open_link((select extra from fixture_ids where label = 'cr'), null);
+  reset role;
+  update fixture_ids set extra = v_nonce where label = 'nonce_fresh';
+end $$;
+
+select pg_temp.refresh_nonce();
 select throws_ok(
-  format($$ select worker.finish_confirmation(%L, (select action_nonce from app.confirmation_requests where id = %L)::text,
+  format($$ select worker.finish_confirmation(%L, %L,
     'CONFIRM', true, null, null, '{"_canon":"epi-canon/2"}'::jsonb, %L, %L, clock_timestamp(),
     '[{"id":"11111111-1111-4111-8111-111111111111","type":"IDENTITY_OTP","provider":"INTERNAL","result":"PASS","occurred_at_utc":"2026-09-04T00:00:00.000Z"}]'::jsonb) $$,
     (select extra from fixture_ids where label = 'cr'),
-    (select id from fixture_ids where label = 'cr'),
+    (select extra from fixture_ids where label = 'nonce_fresh'),
     (select extra from fixture_ids where label = 'canon_bytes'),
     (select extra from fixture_ids where label = 'canon_sha256')),
   '0A000', 'unsupported_factor_type',
   'IDENTITY_OTP is representable by the model but rejected at runtime -- no usable OTP path exists'
 );
 
+select pg_temp.refresh_nonce();
 select throws_ok(
-  format($$ select worker.finish_confirmation(%L, (select action_nonce from app.confirmation_requests where id = %L)::text,
+  format($$ select worker.finish_confirmation(%L, %L,
     'CONFIRM', true, null, null, '{"_canon":"epi-canon/2"}'::jsonb, %L, %L, clock_timestamp(),
     '[{"id":"11111111-1111-4111-8111-111111111112","type":"IDENTITY_KNOWLEDGE","provider":"ACME_VENDOR","result":"PASS","occurred_at_utc":"2026-09-04T00:00:00.000Z","method":"LINK_KNOWLEDGE"}]'::jsonb) $$,
     (select extra from fixture_ids where label = 'cr'),
-    (select id from fixture_ids where label = 'cr'),
+    (select extra from fixture_ids where label = 'nonce_fresh'),
     (select extra from fixture_ids where label = 'canon_bytes'),
     (select extra from fixture_ids where label = 'canon_sha256')),
   '0A000', 'unsupported_provider',
   'a provider outside the closed allowlist is refused (provider spoofing)'
 );
 
+select pg_temp.refresh_nonce();
 select throws_ok(
-  format($$ select worker.finish_confirmation(%L, (select action_nonce from app.confirmation_requests where id = %L)::text,
+  format($$ select worker.finish_confirmation(%L, %L,
     'CONFIRM', true, null, null, '{"_canon":"epi-canon/2"}'::jsonb, %L, %L, clock_timestamp(),
     '[{"id":"11111111-1111-4111-8111-111111111113","type":"IDENTITY_KNOWLEDGE","provider":"INTERNAL","result":"PASS","occurred_at_utc":"2026-09-04T00:00:00.000Z","method":"LINK_KNOWLEDGE","metadata":{"otp_code":"123456"}}]'::jsonb) $$,
     (select extra from fixture_ids where label = 'cr'),
-    (select id from fixture_ids where label = 'cr'),
+    (select extra from fixture_ids where label = 'nonce_fresh'),
     (select extra from fixture_ids where label = 'canon_bytes'),
     (select extra from fixture_ids where label = 'canon_sha256')),
   '23514', 'forbidden_metadata_key',
   'a denylisted metadata key (otp) is refused before it can reach a sealed payload'
 );
 
+select pg_temp.refresh_nonce();
 select throws_ok(
-  format($$ select worker.finish_confirmation(%L, (select action_nonce from app.confirmation_requests where id = %L)::text,
+  format($$ select worker.finish_confirmation(%L, %L,
     'CONFIRM', true, null, null, '{"_canon":"epi-canon/2"}'::jsonb, %L, %L, clock_timestamp(),
     '[{"id":"11111111-1111-4111-8111-111111111114","type":"IDENTITY_KNOWLEDGE","provider":"INTERNAL","result":"FAIL","occurred_at_utc":"2026-09-04T00:00:00.000Z","method":"LINK_KNOWLEDGE"}]'::jsonb) $$,
     (select extra from fixture_ids where label = 'cr'),
-    (select id from fixture_ids where label = 'cr'),
+    (select extra from fixture_ids where label = 'nonce_fresh'),
     (select extra from fixture_ids where label = 'canon_bytes'),
     (select extra from fixture_ids where label = 'canon_sha256')),
   '23514', 'only_accepted_factors_are_persisted',
@@ -254,12 +274,12 @@ select ok(
 select is(
   (select achieved_assurance_level::text from app.identity_verifications
    where id = (select id from fixture_ids where label = 'factor_signature')),
-  null,
+  null::text,
   'the signature factor carries no assurance level -- a drawn signature never raises identity confidence'
 );
 select is(
   (select method from app.identity_verifications where id = (select id from fixture_ids where label = 'factor_signature')),
-  null,
+  null::text,
   'the signature factor carries no identity method either'
 );
 select is(
