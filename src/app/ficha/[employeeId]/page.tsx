@@ -7,6 +7,8 @@ import {
   getDeliveryItemsFor,
   getEvidenceSummary,
   getReturnsForItems,
+  getJobPositions,
+  getLocations,
   type Delivery,
   type DeliveryItem,
   type EmployeeStatus,
@@ -65,10 +67,18 @@ export default async function FichaPage({ params }: { params: Promise<{ employee
     notFound();
   }
 
-  const [company, employeeDeliveries] = await Promise.all([
+  // Spec §15 asks for the employee's position and unit on this sheet. position_id (the
+  // catalog cargo) is the forward-looking field; position_title stays the fallback for anyone
+  // never mapped to the catalog, exactly as employees/[id] renders it.
+  const [company, employeeDeliveries, positions, locations] = await Promise.all([
     getCompany(employee.companyId),
     getEmployeeDeliveries(employee.id),
+    employee.positionId ? getJobPositions(employee.companyId) : Promise.resolve([]),
+    employee.locationId ? getLocations(employee.companyId) : Promise.resolve([]),
   ]);
+  const positionLabel =
+    positions.find((p) => p.id === employee.positionId)?.title ?? employee.positionTitle ?? "—";
+  const locationLabel = locations.find((l) => l.id === employee.locationId)?.name ?? "—";
   if (!company) {
     notFound();
   }
@@ -130,7 +140,8 @@ export default async function FichaPage({ params }: { params: Promise<{ employee
           <Field label="Nome do empregado" value={employee.fullName} className="sm:col-span-2" />
           <Field label="CPF" value={employee.cpfMasked} mono />
           <Field label="Matrícula" value={employee.registrationNumber ?? "—"} mono />
-          <Field label="Cargo" value={employee.positionTitle ?? "—"} className="sm:col-span-2" />
+          <Field label="Cargo" value={positionLabel} className="sm:col-span-2" />
+          <Field label="Unidade / Local" value={locationLabel} />
           <Field label="Setor / Departamento" value={employee.department ?? "—"} />
           <Field label="Situação" value={STATUS_LABEL[employee.status]} />
         </dl>
@@ -176,7 +187,14 @@ export default async function FichaPage({ params }: { params: Promise<{ employee
                   <Td className="font-mono">{item.caNumber}</Td>
                   <Td className="text-right tabular-nums">{item.quantity}</Td>
                   <Td>{UNIT_LABEL[item.unit] ?? item.unit}</Td>
-                  <Td>{receiptLabel(delivery, company.timeZone)}</Td>
+                  <Td>
+                    {receiptLabel(delivery, company.timeZone)}
+                    {delivery.status === "CONFIRMED" && evidences.get(delivery.id) ? (
+                      <span className="block text-[9px] text-[#555]">
+                        Identidade: {identityLabel(evidences.get(delivery.id)?.payload)}
+                      </span>
+                    ) : null}
+                  </Td>
                   <Td className="font-mono">{evidences.get(delivery.id)?.verificationCode ?? "—"}</Td>
                   <Td>
                     {signatureSrc ? (
@@ -226,17 +244,54 @@ export default async function FichaPage({ params }: { params: Promise<{ employee
  * evidence payload for print rendering. Older confirmations sealed before this field
  * existed won't have one -- rendered as "—" by the caller, same as a missing verification
  * code. `payload` is untyped (Record<string, unknown>) because it's opaque at the DB layer;
- * this is the one place its `signature` key gets read back out. */
+ * this is the one place its signature gets read back out.
+ *
+ * Reads the SEAL, never app.identity_verifications: for a sealed confirmation the
+ * canonical_bytes are the historical authority (Phase E contract), so this document must not
+ * reconstruct a different "historical truth" from a mutable operational table. Both canonical
+ * versions are handled -- epi-canon/1 carries `signature` at the top level, epi-canon/2 moves
+ * it inside its DECLARATION_SIGNATURE factor, which is its single authority there. */
 function signatureImageSrc(payload: Record<string, unknown> | undefined): string | null {
-  const signature = payload?.signature;
+  const fromFactor = sealedFactors(payload).find((f) => f.type === "DECLARATION_SIGNATURE")?.signature;
+  const signature = fromFactor ?? payload?.signature;
   if (!signature || typeof signature !== "object") return null;
   const { format, data } = signature as { format?: unknown; data?: unknown };
   if (typeof format !== "string" || typeof data !== "string" || !data) return null;
   return `data:${format};base64,${data}`;
 }
 
+type SealedFactor = { type?: string; method?: string; signature?: unknown };
+
+/** The accepted factors as they were sealed. Empty for epi-canon/1, which predates factors --
+ * that version's identity lives in `identity.method` instead (see identityLabel below). */
+function sealedFactors(payload: Record<string, unknown> | undefined): SealedFactor[] {
+  const factors = payload?.factors;
+  return Array.isArray(factors) ? (factors as SealedFactor[]) : [];
+}
+
+/** How this receipt's identity was verified, straight from the seal. epi-canon/1 keeps the
+ * method under `identity`; epi-canon/2 keeps it on the identity factor. Never renders a method
+ * that was not actually performed. */
+function identityLabel(payload: Record<string, unknown> | undefined): string {
+  const identity = payload?.identity as { method?: unknown; achieved_assurance_level?: unknown } | undefined;
+  const factorMethod = sealedFactors(payload).find((f) => f.type?.startsWith("IDENTITY_"))?.method;
+  const method = factorMethod ?? (typeof identity?.method === "string" ? identity.method : null);
+
+  const METHOD_LABEL: Record<string, string> = {
+    LINK_ONLY: "link individual",
+    LINK_KNOWLEDGE: "link + 3 últimos dígitos do CPF",
+    SELFIE_LIVENESS: "selfie com prova de vida",
+    FACE_MATCH_ENROLLED: "reconhecimento facial",
+    GOV_VERIFIED: "verificação governamental",
+  };
+  if (!method) return "—";
+  return METHOD_LABEL[method] ?? method;
+}
+
 /** How this delivery's receipt was signed -- the column that replaces the handwritten
- * signature on the paper version. */
+ * signature on the paper version. A superseded row names its position in the correction chain
+ * (spec §15 asks for trocas to be explicit, not just implied by a status word), so a reader
+ * can tell WHICH delivery in a sequence of three boots this one was. */
 function receiptLabel(delivery: Delivery, timeZone: string | null): string {
   if (delivery.status === "CONFIRMED" && delivery.confirmedAt) {
     return `Confirmado em ${formatDateTimeBr(delivery.confirmedAt, timeZone)}`;
@@ -244,7 +299,9 @@ function receiptLabel(delivery: Delivery, timeZone: string | null): string {
   if (delivery.status === "CONTESTED" && delivery.contestedAt) {
     return `CONTESTADO em ${formatDateTimeBr(delivery.contestedAt, timeZone)}`;
   }
-  if (delivery.status === "SUPERSEDED") return "Substituída por nova entrega";
+  if (delivery.status === "SUPERSEDED") {
+    return `Substituída (troca ${delivery.chainVersion}ª → ${delivery.chainVersion + 1}ª entrega desta sequência)`;
+  }
   if (delivery.status === "ISSUED") return "Aguardando confirmação";
   return "—";
 }
