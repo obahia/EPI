@@ -2202,3 +2202,167 @@ export const getStockMovements = cache(
     return (data as StockMovementRow[]).map(mapStockMovementRow);
   },
 );
+
+// ---------------------------------------------------------------------------------------
+// Phase F: the integration plane (API keys and webhooks)
+// ---------------------------------------------------------------------------------------
+// Read through RPCs rather than api.* views, unlike everything above. Every other read here
+// is a security_invoker view over app/authz/..., which requires the caller to hold SELECT on
+// the underlying table -- and m2m.*/hooks.* grant SELECT to nobody, which is exactly how it
+// should stay. So these are SECURITY DEFINER functions that do their own ORG_ADMIN check.
+
+export type IntegrationPrincipal = {
+  id: string;
+  name: string;
+  companyIds: string[] | null;
+  scopes: string[];
+  status: string;
+  createdAt: string;
+  revokedAt: string | null;
+  activeKeyCount: number;
+  lastUsedAt: string | null;
+};
+
+export const getIntegrationPrincipals = cache(
+  async (organizationId: string): Promise<IntegrationPrincipal[]> => {
+    const session = await verifySession();
+    if (!session.isAuthenticated) return [];
+
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .schema("api")
+      .rpc("list_integration_principals", { p_organization_id: organizationId });
+
+    if (error || !data) return [];
+    return (data as Record<string, never>[]).map((row) => ({
+      id: row["id"] as unknown as string,
+      name: row["name"] as unknown as string,
+      companyIds: row["company_ids"] as unknown as string[] | null,
+      scopes: (row["scopes"] as unknown as string[]) ?? [],
+      status: row["status"] as unknown as string,
+      createdAt: row["created_at"] as unknown as string,
+      revokedAt: row["revoked_at"] as unknown as string | null,
+      activeKeyCount: (row["active_key_count"] as unknown as number) ?? 0,
+      lastUsedAt: row["last_used_at"] as unknown as string | null,
+    }));
+  },
+);
+
+export type ApiKeySummary = {
+  id: string;
+  keyId: string;
+  env: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  revokeReason: string | null;
+};
+
+/** Never returns secret_hash: it has no legitimate reader outside m2m.resolve_principal, and
+ * api.list_api_keys does not include it in its RETURNS list either. */
+export const getApiKeys = cache(async (principalId: string): Promise<ApiKeySummary[]> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.schema("api").rpc("list_api_keys", {
+    p_principal_id: principalId,
+  });
+
+  if (error || !data) return [];
+  return (data as Record<string, never>[]).map((row) => ({
+    id: row["id"] as unknown as string,
+    keyId: row["key_id"] as unknown as string,
+    env: row["env"] as unknown as string,
+    createdAt: row["created_at"] as unknown as string,
+    lastUsedAt: row["last_used_at"] as unknown as string | null,
+    expiresAt: row["expires_at"] as unknown as string | null,
+    revokedAt: row["revoked_at"] as unknown as string | null,
+    revokeReason: row["revoke_reason"] as unknown as string | null,
+  }));
+});
+
+export type WebhookEndpointSummary = {
+  id: string;
+  url: string;
+  description: string | null;
+  eventTypes: string[];
+  status: string;
+  orderedDelivery: boolean;
+  consecutiveFailures: number;
+  createdAt: string;
+  secretRotatedAt: string | null;
+  pendingCount: number;
+  dlqCount: number;
+  lastSuccessAt: string | null;
+};
+
+export const getWebhookEndpoints = cache(
+  async (organizationId: string): Promise<WebhookEndpointSummary[]> => {
+    const session = await verifySession();
+    if (!session.isAuthenticated) return [];
+
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .schema("api")
+      .rpc("list_webhook_endpoints", { p_organization_id: organizationId });
+
+    if (error || !data) return [];
+    return (data as Record<string, never>[]).map((row) => ({
+      id: row["id"] as unknown as string,
+      url: row["url"] as unknown as string,
+      description: row["description"] as unknown as string | null,
+      eventTypes: (row["event_types"] as unknown as string[]) ?? [],
+      status: row["status"] as unknown as string,
+      orderedDelivery: row["ordered_delivery"] as unknown as boolean,
+      consecutiveFailures: (row["consecutive_failures"] as unknown as number) ?? 0,
+      createdAt: row["created_at"] as unknown as string,
+      secretRotatedAt: row["secret_rotated_at"] as unknown as string | null,
+      pendingCount: (row["pending_count"] as unknown as number) ?? 0,
+      dlqCount: (row["dlq_count"] as unknown as number) ?? 0,
+      lastSuccessAt: row["last_success_at"] as unknown as string | null,
+    }));
+  },
+);
+
+export type WebhookDeliverySummary = {
+  id: string;
+  eventType: string;
+  webhookType: string;
+  state: string;
+  attempts: number;
+  lastStatus: number | null;
+  lastError: string | null;
+  createdAt: string;
+  settledAt: string | null;
+  nextAttemptAt: string;
+};
+
+export const getWebhookDeliveries = cache(
+  async (endpointId: string, state?: string): Promise<WebhookDeliverySummary[]> => {
+    const session = await verifySession();
+    if (!session.isAuthenticated) return [];
+
+    const supabase = await createClient();
+    const { data, error } = await supabase.schema("api").rpc("list_webhook_deliveries", {
+      p_endpoint_id: endpointId,
+      p_state: state ?? null,
+      p_limit: 50,
+    });
+
+    if (error || !data) return [];
+    return (data as Record<string, never>[]).map((row) => ({
+      id: row["id"] as unknown as string,
+      eventType: row["event_type"] as unknown as string,
+      webhookType: row["webhook_type"] as unknown as string,
+      state: row["state"] as unknown as string,
+      attempts: (row["attempts"] as unknown as number) ?? 0,
+      lastStatus: row["last_status"] as unknown as number | null,
+      lastError: row["last_error"] as unknown as string | null,
+      createdAt: row["created_at"] as unknown as string,
+      settledAt: row["settled_at"] as unknown as string | null,
+      nextAttemptAt: row["next_attempt_at"] as unknown as string,
+    }));
+  },
+);

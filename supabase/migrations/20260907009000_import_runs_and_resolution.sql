@@ -163,7 +163,11 @@ begin
                      where jp.organization_id = v_org_id
                        and jp.status = 'ACTIVE'
                        and (jp.company_id is null or jp.company_id = p_company_id)
-                       and app.normalize_import_label(jp.title) % m.norm) end
+                       -- OPERATOR(extensions.%) explicitly: pg_trgm lives in `extensions`,
+                       -- and this function runs with search_path = '', where a bare % does
+                       -- not resolve. Schema-qualifying a FUNCTION is habit; an OPERATOR
+                       -- needs this syntax and is easy to miss.
+                       and app.normalize_import_label(jp.title) OPERATOR(extensions.%) m.norm) end
     from matched m;
 
   -- Locations. app.locations has NO unique index on name or code, so two active units of the

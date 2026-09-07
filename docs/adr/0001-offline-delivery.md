@@ -44,6 +44,16 @@ just move the same bugs a live customer would hit from "days" to "hours."
    idempotency key (e.g. a UUID minted at record-time) that the server can use to detect
    "I've already applied this exact offline record" and return the original result instead
    of creating a duplicate delivery + a duplicate stock movement.
+
+   > **Atualização (Fase F, 2026-09-07).** Esse mecanismo agora existe — para o plano
+   > público, não para o painel. Ver `docs/architecture.md` §23 e
+   > `supabase/migrations/20260907004000_m2m_rpc_writes.sql`: `m2m.claim_idempotency` +
+   > `m2m.complete_idempotency`, numa única transação (claim → domínio → COMPLETED →
+   > COMMIT), o que torna estruturalmente impossível o estado "commitou mas o cliente não
+   > soube". `api.create_delivery` continua **sem** chave de idempotência: um caminho
+   > offline reusaria o mesmo desenho, mas exigiria uma variante de
+   > `m2m.claim_idempotency` escopada ao usuário em vez do principal de máquina. O resto
+   > deste ADR permanece válido.
 5. **Evidência e timestamps.** The evidence payload's canonicalization
    (`src/lib/evidence/canon.ts`) requires fixed-precision UTC timestamps built from
    **server-authoritative** data (`worker.get_evidence_source`), not client-supplied ones —

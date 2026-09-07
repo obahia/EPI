@@ -197,3 +197,44 @@ Fora do roteiro FASE 0–7 (não é parte da Definition of Done do enunciado): o
 - **Tradução de todo o painel** (empresas, funcionários, EPIs, entregas, lotes) feita por dois agentes em background, sequenciais (não paralelos) para evitar condição de corrida na edição simultânea do mesmo arquivo `dictionaries.ts` — um para empresas+funcionários, outro para EPIs+entregas+lotes. Regra passada aos dois: só extrair strings para o dicionário, nunca tocar lógica de negócio/RPCs/validação; qualquer classe de cor hardcoded (`text-green-600` etc.) vira token (`text-success`/`text-warning`/`text-destructive`). Ambos os diffs foram revisados manualmente neste arquivo por arquivo em `batch-actions.ts` e `epis/actions.ts` (os mais sensíveis, com geração de token/RPC) — confirmado: só troca de string, nenhuma mudança de lógica.
 - `getDeliveryStatusMeta()` (função pura testada em `delivery-status-badge.test.ts`) continua retornando o rótulo pt-BR original — a tradução de fato acontece em `deliveryStatusLabel(t, status)`, chamada só no componente `<DeliveryStatusBadge>` (que agora é Client Component com `useT()`), preservando o teste existente sem enfraquecê-lo.
 - **Verificado**: `npx tsc --noEmit`, `npx eslint src --max-warnings=0` e `npx vitest run` (81/81) passam limpos após as duas rodadas do agente. `npx playwright` screenshot manual confirmou visualmente `/`, `/login`, `/forgot-password`, `/reset-password` e uma rota 404 (`/this-does-not-exist`) contra o dev server local. **Não verificado ao vivo**: o painel autenticado (`/dashboard`, `/companies`, etc.) com a barra lateral nova — tentativas de criar uma conta de teste via signup falharam (provavelmente rate limit do Supabase Auth após tentativas repetidas nesta sessão), não uma regressão introduzida aqui; recomenda-se conferir visualmente na próxima vez que alguém logar de verdade.
+
+---
+
+## FASE F — Integrações (2026-09-07)
+
+Escopo: §18 (importação), §19 (API pública), §20 (webhooks) da especificação original. Precedida por uma reconstrução de escopo (Passo 0) e por um contrato formal, ambos aprovados antes de qualquer linha de código.
+
+### O que foi construído
+
+**Extração do domínio, em duas etapas separadas de propósito.** A `20260907000000` move o corpo de `api.create_employee`/`api.update_employee` para `app.*_core(app.actor_context, …)` removendo **somente** a autorização — a prova de neutralidade é que as suítes pgTAP 020–170 passam sem uma única edição. A `20260907005000` só então adiciona `EMPLOYEE_CREATED`/`EMPLOYEE_UPDATED`. Juntar as duas teria tornado a afirmação de neutralidade impossível de verificar.
+
+**Plano M2M.** `m2m` (principals, chaves, idempotência, quota) e `m2m_rpc` (o único schema novo exposto ao PostgREST, concedido só a `service_role`). Uma API key não é usuário: `auth.uid()` e os quatro helpers `auth_ctx.*` ficam byte a byte iguais. As RPCs recebem `(key_id, secret_hash)` e resolvem o principal dentro do Postgres — a credencial de banco sozinha não autoriza nada.
+
+**API v1.** Nove rotas (`employees` read/write, `positions`/`locations`/`epis`/`deliveries` read). `POST /v1/deliveries` e o escopo `deliveries:write` ficaram fora por decisão explícita. Confirmação e selamento de evidência são inalcançáveis por construção.
+
+**Webhooks.** `hooks.outbox` alimentado por trigger `AFTER INSERT` em `audit.audit_events`, na própria transação do evento. Runner em Vercel Cron. Política SSRF com pinagem de IP pós-resolução DNS, sem seguir redirect.
+
+**Importação.** Cargo → `position_id`, Unidade → `location_id`, XLSX, e `app.import_runs`/`app.import_run_chunks` para que uma importação parcial seja legível e retomável. Nada é criado automaticamente.
+
+### Verificações que mudaram o desenho
+
+**T.1 — o papel `selo_m2m` não pôde ser usado, apesar de ser suportado.** Uma sonda descartável rodada em `epi-dev` (dentro de `begin/rollback`, sem resíduo) provou que criar o papel funciona, que `GRANT ... TO authenticator` funciona, e que o isolamento é total: 10 schemas negados, 6 tabelas negadas no catálogo *e* com `42501` na leitura real, `auth.uid()` inalcançável. Mas o JWKS do projeto publica **apenas ES256 assimétrico** e a chave privada é do Supabase — não há como assinar um JWT com `role = selo_m2m`. Foi o que levou à decisão Alt-2, e à percepção de que a âncora de autorização deveria ser a chave de API resolvida no banco, não o papel Postgres.
+
+**T.2 — o runner.** Nada está implantado (sem `vercel.json` até esta fase, sem workflow de deploy, sem Edge Functions, sem `pg_cron`/`pg_net` no banco real). A única decisão de deployment que o projeto tomou é Vercel (§19), e Vercel Cron é a única opção que não adiciona runtime, pipeline nem observabilidade novos. `pg_net` foi rejeitado por colocar I/O de rede dentro do Postgres.
+
+### Bugs reais encontrados por teste, não por leitura
+
+1. `parseApiKey` fazia `split("_")` na chave inteira, mas o segredo é base64url — cujo alfabeto contém `_`. Cerca de metade das chaves geradas falhava no parse.
+2. `checkWebhookUrl` não reconhecia literais IPv6: `URL.hostname` mantém os colchetes e `isIP()` não aceita endereço entre colchetes, então o check `ip_literal` nunca disparava. Era recusado apenas pela heurística "precisa conter ponto" — que `[::ffff:127.0.0.1]` satisfaz.
+3. `api.resolve_import_references` usava o operador `%` do pg_trgm sob `search_path = ''`, onde ele não resolve. Corrigido para `OPERATOR(extensions.%)` — qualificar uma *função* é hábito, qualificar um *operador* precisa dessa sintaxe e passa despercebido.
+
+### Divergências registradas, não resolvidas silenciosamente
+
+- Roadmap ("position CSV import") vs §18 (import de colaboradores): ver `docs/architecture.md` §25.
+- `docs/architecture.md` §10 e §11 descreviam como presente um design nunca construído (`notification_attempts`, `integ.*`, `app.new_employee_version`, `employee_fields_are_readonly`). Corrigidos e rotulados, sem construir a arquitetura antiga só para tornar o doc verdadeiro.
+
+### Não implementado, declarado
+
+- `delivery.refused` (nenhum evento tem essa semântica) e `compliance.changed` (compliance é derivada; materializá-la criaria uma segunda fonte de verdade).
+- `X-RateLimit-Remaining` em respostas de sucesso.
+- Criação automática de cargo/unidade no import — proibida, sem opt-in.

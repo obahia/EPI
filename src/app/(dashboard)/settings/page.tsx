@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { verifySession, getMyMemberships, getOrganizationPolicy } from "@/lib/supabase/dal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary } from "@/i18n/dictionaries";
 import { OrganizationPolicyForm } from "./organization-policy-form";
@@ -43,6 +45,22 @@ export default async function SettingsPage() {
         </CardHeader>
         <CardContent>
           <OrganizationPolicyForm organizationId={policy.organizationId} policy={policy} />
+        </CardContent>
+      </Card>
+
+      {/* Phase F. Reached from here rather than from the sidebar: the sidebar is a client
+          component that only receives the plain identity prop, so it cannot see the
+          org-wide ORG_ADMIN membership this section requires -- and /settings already
+          gates on exactly that. */}
+      <Card className="max-w-lg">
+        <CardHeader>
+          <CardTitle>{t.settings.integrationsCardTitle}</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col items-start gap-3">
+          <p className="text-[13px] text-muted-foreground">{t.settings.integrationsCardDescription}</p>
+          <Button asChild>
+            <Link href="/settings/integrations">{t.settings.integrationsCardLink}</Link>
+          </Button>
         </CardContent>
       </Card>
     </main>

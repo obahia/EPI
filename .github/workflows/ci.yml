@@ -113,6 +113,19 @@ jobs:
         env:
           SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
 
+      # Phase F: the outbox trigger's cost, measured against a baseline taken with the
+      # trigger removed. Reports numbers rather than passing or failing -- there is no
+      # invented threshold. Read B1 first: that is what every tenant without a webhook pays,
+      # which today is all of them. B3 materially worse than B2 would mean enqueue cost grows
+      # with the backlog, which is a design defect.
+      - name: Outbox trigger benchmark (baseline vs trigger, runner deliberately off)
+        run: node scripts/outbox-benchmark.mjs
+        env:
+          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+          BENCH_REPEATS: "3"
+          BENCH_SEQUENTIAL_N: "200"
+          BENCH_CONCURRENT_N: "240"
+
       - name: Stop local Supabase stack
         if: always()
         run: supabase stop

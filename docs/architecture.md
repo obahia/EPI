@@ -317,6 +317,8 @@ interface NotificationProvider {
 }
 ```
 
+> **⚠ FUTURO, não implementado (verificado 2026-09-07).** `notification_attempts` **não existe** e não há `src/lib/notifications/`. Esta seção descreve o design pretendido, não o estado atual. O canal real hoje é `MANUAL_COPY` (o gestor copia o link), sem tabela de tentativas. Mantido como design porque continua correto — mas não confunda com algo construído.
+
 `notification_attempts` (append-only) grava tentativa, provedor, status, erro, timestamp — nunca o link/token em si. MVP: canal `MANUAL_COPY` (gestor copia o link) + e-mail, sempre disponíveis sem depender de aprovação externa. WhatsApp Business (canal preferencial) fica de fora do MVP inicial não por escolha técnica, mas porque a aprovação de template da Meta leva semanas e o texto fica efetivamente congelado depois de aprovado — **iniciar esse processo agora é uma ação recomendada independente do cronograma de código.**
 
 ## 11. Estratégia de integração WOTY
@@ -328,15 +330,21 @@ A pesquisa confirmou que existe documentação pública, não-autenticada, em `h
 - **Sem campo de `updatedAt`/versão e sem webhook visível** — sincronização incremental por *delta* não é possível com o que foi encontrado; a arquitetura deve assumir *full scan* periódico paginado, com filtro por data quando disponível.
 - **O que permanece genuinamente desconhecido**: o **esquema de autenticação**. Toda tentativa de acesso a rota protegida retornou 401 sem corpo e sem header `WWW-Authenticate` — não há indício de OAuth, API key em header, ou Basic Auth visível de fora. **Isto não será inventado.** Exige contato direto com o WOTY/cliente para obter credenciais e, idealmente, documentação de autenticação antes de qualquer chamada real.
 
-### Arquitetura (pronta; chamadas reais pendentes)
+### Arquitetura (DESIGN FUTURO — corrigido em 2026-09-07)
+
+> **⚠ Estado real, verificado contra o código.** O schema `integ` **existe e está vazio**: zero tabelas, zero funções. Nenhuma das tabelas abaixo foi construída. O texto original desta seção descrevia como verdade presente um design que nunca saiu do papel; o que segue é o design, explicitamente rotulado como tal, com as correções factuais aplicadas.
 
 ```
 WOTY  →  integ.sync_runs (pull periódico, paginado)  →  nosso banco  →  aplicação lê só nosso banco
 ```
 
-`integ.integration_connections` guarda `credential_ref` (ponteiro para Supabase Vault — aqui sim Vault é apropriado, pois é um segredo de terceiro, não nosso token de sessão), nunca a credencial em si. `integ.external_mappings (provider, entity_type, external_id, internal_id)` sobrevive independente da disponibilidade do WOTY. Escrita de sincronização passa por `app.new_employee_version(data_origin='SYNC_WOTY')` — nunca um `UPDATE` in-place, porque uma mudança de cargo vinda do WOTY não pode reescrever retroativamente o que um recibo de 2026 já declarou.
+`integ.integration_connections` guardaria `credential_ref` (ponteiro para Supabase Vault — aqui sim Vault é apropriado, pois é um segredo de terceiro, não nosso token de sessão), nunca a credencial em si.
 
-**Decisão de conflito** (WOTY vs edição manual): campos sincronizados ficam somente-leitura no painel para empresas conectadas (`integration_connections.employee_fields_are_readonly`); uma tentativa de edição manual é rejeitada com mensagem clara, não sobrescrita silenciosa no próximo sync. **Confirmar com o primeiro cliente antes da integração real** — é comportamento de UI visível, não um detalhe.
+**Correção 1 — mapeamento externo.** O doc original especificava `integ.external_mappings (provider, entity_type, external_id, internal_id)`. Essa tabela **não existe**. O que existe, e é a autoridade sobre o estado atual, são colunas inline em `app.employees`: `data_origin` (enum `app.data_origin`, já com os valores `MANUAL`, `IMPORT`, `SYNC_WOTY`, `API`), `external_source` e `external_ref` — aceitas por `api.create_employee` desde a FASE 1. Uma tabela relacional dedicada permanece um design futuro, a ser adotado só se houver necessidade concreta.
+
+**Correção 2 — `app.new_employee_version` não existe.** O doc original afirmava que a escrita de sincronização passaria por `app.new_employee_version(data_origin='SYNC_WOTY')`, "nunca um `UPDATE` in-place". **Essa função nunca foi construída e `app.employees` não é SCD2** — apenas o catálogo de EPI é (`app.epis` / `app.epi_versions`). A garantia que realmente protege o histórico é outra, e é mais forte: os recibos selados carregam os valores por **snapshot** (nome, cargo, CA, item — copiados no momento da entrega e imunes a qualquer edição posterior), então uma mudança de cargo não pode reescrever o que um recibo de 2026 declarou, independentemente de o registro relacional ser versionado ou não. O versionamento do registro relacional permanece não implementado.
+
+**Correção 3 — `employee_fields_are_readonly` não existe.** A decisão de conflito (WOTY vs edição manual) descrita abaixo é um design, não um comportamento: não há coluna, não há enforcement e não há UI. **Confirmar com o primeiro cliente antes da integração real** — é comportamento de UI visível, não um detalhe.
 
 Se o WOTY cair, nada no produto quebra — a última sincronização bem-sucedida (`last_success_at`) permanece como os dados de trabalho.
 
@@ -381,6 +389,8 @@ Tipos de evento (subconjunto do enunciado, com adições que a pesquisa mostrou 
 **Nunca em `audit.audit_events`**: selfie, biometria, segredo, token completo, CPF completo sem necessidade. `data jsonb` tem `CHECK (pg_column_size(data) < 8000)` — um limite físico contra alguém tentar enfiar um blob ali por engano.
 
 Uma âncora diária por tenant (`audit.chain_anchors`) — o hash de topo da cadeia daquele dia, timestampado externamente (RFC 3161, autoridade ICP-Brasil credenciada — ver §20 sobre se isso é necessário por confirmação ou só diariamente) e espelhado em armazenamento *object-lock*. Converte "afirmamos que não adulteramos" em "um terceiro atestou nosso hash de topo naquela data".
+
+> **Fase F.** `audit.audit_events` ganhou `actor_principal_id` (nullable, FK para `m2m.integration_principals`), preenchida por um trigger `BEFORE INSERT` a partir de um setting transaction-local, e somente quando `actor_kind = 'PROVIDER'`. Ela está **fora** do cálculo de `event_hash`: a fórmula do hash é fixa sobre um conjunto fixo de campos, e alterá-la invalidaria a verificabilidade de todo evento já escrito. `app.log_audit_event` **não foi modificada**. Tipos de evento novos: `EMPLOYEE_CREATED`, `EMPLOYEE_UPDATED`, `EMPLOYEES_IMPORTED`, `API_PRINCIPAL_CREATED`/`_UPDATED`/`_REVOKED`, `API_KEY_CREATED`/`_REVOKED`, `WEBHOOK_ENDPOINT_CREATED`, `WEBHOOK_ENDPOINT_STATUS_CHANGED`, `WEBHOOK_SECRET_ROTATED`, `WEBHOOK_REPLAYED`. Ver §23 e §24.
 
 ## 14. Storage
 
@@ -449,6 +459,7 @@ Sem confirmação offline — servidor é obrigatório para preservar consistên
 - Vercel, região de função fixada em `gru1` (São Paulo/`sa-east-1`) — **isto é possível em qualquer plano**, não exige Enterprise (só *multi*-região exige Pro+); confirmado contra a documentação atual, corrigindo uma suposição inicial errada.
 - Runtime Node (nunca Edge) em toda rota que toca o pepper de token ou credenciais — `proxy.ts`/middleware roda só como checagem otimista.
 - Supabase, projeto dedicado, `sa-east-1`, Postgres 17.
+- **Fase F:** `vercel.json` fixa `regions: ["gru1"]` e declara dois crons — `/api/internal/webhook-runner` a cada minuto (exige plano **Pro**; no Hobby o mínimo é 1×/dia e webhooks ficam inviáveis) e `/api/internal/maintenance` diário. Ambas as rotas **falham fechadas** quando `CRON_SECRET` não está configurado. Note que, apesar desta seção existir desde a FASE 0, **nada está implantado**: não há projeto Vercel configurado no repositório e o CI não faz deploy.
 - CI: `supabase/setup-cli@v1`, `supabase db reset` (aplica migrations do zero) + pgTAP em todo PR; `supabase db push` em staging/produção via workflow separado, nunca `db push` manual contra produção.
 - Falha de plano Pro relevante e verificada: **failover multi-região de Vercel Functions é recurso Enterprise** — no plano Pro, uma indisponibilidade regional é uma indisponibilidade, ponto. Isso é uma decisão de negócio (aceitar o risco vs. pagar Enterprise), não um detalhe técnico — sinalizado em §20.
 
@@ -483,3 +494,182 @@ Sem confirmação offline — servidor é obrigatório para preservar consistên
 ---
 
 Este documento é reavaliado a cada fase — ver `docs/mvp-roadmap.md`. Nenhuma fase avança para código sem que as decisões marcadas "bloqueia" acima estejam resolvidas.
+
+---
+
+## 23. API pública e plano M2M (Fase F)
+
+**A regra central: uma API key não é um usuário.** `auth.uid()` e os quatro helpers `auth_ctx.*` (`company_ids`, `organization_ids`, `has_permission`, `co_member_user_ids`) mantêm corpo e semântica byte a byte inalterados — o caminho de máquina simplesmente não os chama. Nenhuma linha é criada em `app.users` ou `authz.memberships` para representar uma integração.
+
+### Cadeia de resolução
+
+```
+Authorization: Bearer selo_<env>_<key_id>_<secret>
+   │  Node: parse -> HMAC-SHA256(API_KEY_PEPPER, secret)
+   ▼
+m2m_rpc.<operação>(p_key_id, p_secret_hash_b64, ...)
+   │
+   ├─ m2m.resolve_principal   -> zero linhas para TODA falha (chave desconhecida, segredo
+   │                             errado, chave revogada, chave expirada, principal revogado)
+   ├─ quota                   -> m2m.check_quota, consumida antes da checagem de escopo
+   ├─ escopo                  -> antes de ler qualquer entidade
+   ├─ binding org/company     -> m2m.assert_company
+   └─ app.<operação>_core(actor_context, ...)   <- o MESMO domínio que o painel executa
+```
+
+### Autorização separada da operação de domínio
+
+Cada operação em escopo tem seu corpo de domínio em `app.<op>_core(app.actor_context, …)` — revogado de `public`, `anon`, `authenticated` e `service_role`, portanto inalcançável por qualquer cliente. Dois façades finos autorizam e delegam: `api.<op>` para humanos (via `auth_ctx`), `m2m_rpc.<op>` para máquinas (via chave de API). Uma única implementação de invariante serve os dois caminhos; nada é duplicado e nada falsifica `auth.uid()`.
+
+`app.actor_context` carrega **quem**, nunca **onde**: `(actor_kind, actor_user_id, principal_id)`. O escopo de tenant continua em parâmetros explícitos, como sempre esteve.
+
+### Credencial de banco ≠ credencial de autorização
+
+O route handler alcança o Postgres com a chave `sb_secret_` (`service_role`). Isso **não** autoriza nada: `service_role` não tem `USAGE` em nenhum schema de negócio deste projeto — os únicos `grant usage on schema` existentes cobrem `api` → `anon`/`authenticated`, `app`+`auth_ctx` → `authenticated`, `worker` → `anon`. Sua superfície inteira é `m2m_rpc` e `ops_rpc`, e toda função de `m2m_rpc` exige material de chave verificado. Quem tiver apenas a credencial de banco não consegue agir como tenant, ler dados de tenant, nem forjar um principal.
+
+O desenho original previa um papel Postgres dedicado (`selo_m2m`). Ele é **suportado** pelo ambiente (verificado em `epi-dev`: `CREATEROLE=true`, `GRANT ... TO authenticator` funciona, e o isolamento é total), mas o JWT que o ativaria não pode ser produzido: o projeto assina apenas com **ES256 assimétrico** e a chave privada é do Supabase. Como a âncora de autorização é a chave de API resolvida dentro do Postgres — e não o papel — o papel dedicado perde quase todo o valor marginal.
+
+### Escopos
+
+Vocabulário próprio (`m2m.api_scope`, um enum), deliberadamente **não** `authz.role_permissions`: aquele governa pessoas e precisa evoluir sem ampliar silenciosamente o que uma chave já emitida pode fazer.
+
+`employees:read` · `employees:write` · `positions:read` · `locations:read` · `epis:read` · `deliveries:read`
+
+Sem coringa e **sem hierarquia**: `employees:write` não concede `employees:read`. Um escopo nunca muda de significado; ampliar exige um escopo novo.
+
+### Superfície
+
+| Método | Rota | Escopo |
+|---|---|---|
+| GET | `/api/v1/employees` | `employees:read` |
+| GET | `/api/v1/employees/{id}` | `employees:read` |
+| POST | `/api/v1/employees` | `employees:write` |
+| PATCH | `/api/v1/employees/{id}` | `employees:write` |
+| GET | `/api/v1/positions` | `positions:read` |
+| GET | `/api/v1/locations` | `locations:read` |
+| GET | `/api/v1/epis` | `epis:read` |
+| GET | `/api/v1/deliveries` | `deliveries:read` |
+| GET | `/api/v1/deliveries/{id}` | `deliveries:read` |
+
+**Fora, cada um por um motivo declarado.** `DELETE` (arquivamento afeta histórico de recibo). `POST /v1/deliveries` e o escopo `deliveries:write` (só produziria DRAFT, já que `issue` não é exposto — e §19 proíbe publicar endpoint sem requisito concreto). `issue`/`replace`/`return` (regras de janela e crédito de estoque merecem contrato próprio). `/v1/compliance/*` e `/v1/stock/*` (não pedidos por §19). Gestão de chaves e de webhooks por API (auto-escalada).
+
+**Proibido por construção:** confirmação, contestação e selamento de evidência. `service_role` não tem `USAGE` em `worker`, nenhum core de confirmação é extraído, e nenhum endpoint existe. Uma chave capaz de confirmar entregas destruiria o valor probatório do produto.
+
+Nenhum endpoint expõe CPF completo, hash ou ciphertext de CPF, assinatura, `canonical_bytes`, `payload_sha256` ou fatores de evidência. CPF sempre mascarado, sem exceção e sem escopo que libere.
+
+### Idempotência
+
+`Idempotency-Key` é **obrigatória** em toda escrita. A ordem é normativa e acontece em **uma transação**:
+
+```
+BEGIN -> claim da linha de idempotência -> app.<op>_core -> capturar resultado
+      -> marcar COMPLETED com a resposta -> COMMIT
+```
+
+Consequência: "o domínio commitou mas o cliente nunca soube" é **estruturalmente impossível** — as duas escritas são a mesma transação. Uma linha `IN_FLIGHT` commitada não pode existir, então não há lease nem varredor de órfãos. A exclusão mútua vem do índice único, não da leitura de um status. Um erro de domínio faz rollback de tudo, inclusive do registro: erros são **reexecutáveis**, não replayáveis, e por isso a validação de entrada acontece antes da transação — um corpo malformado nunca queima uma chave.
+
+### Rate limiting
+
+Duas dimensões, dois mecanismos, porque o comportamento correto no restart é oposto:
+
+- **Segurança** — `app.check_rate_limit`, tabela UNLOGGED, janelas curtas, caminho do trabalhador. Perder o contador abre uma janela de segundos: aceitável.
+- **Quota** — `m2m.check_quota`, tabela **LOGGED**. Perder o contador serve tráfego não contabilizado e torna a fatura indefensável: inaceitável.
+
+A quota é aplicada **dentro** de `m2m.authorize`, não como pré-checagem separada: assim nenhum endpoint futuro pode esquecê-la, e o caminho feliz não paga um round trip extra.
+
+`X-RateLimit-Limit` e `X-RateLimit-Reset` são sempre emitidos. `X-RateLimit-Remaining` só no `429`, onde é conhecidamente zero — o valor exato vive dentro da transação da RPC, e reportar uma aproximação seria pior do que omitir.
+
+---
+
+## 24. Webhooks (Fase F)
+
+### Fonte canônica e enfileiramento atômico
+
+```
+transação de negócio
+  ├─ mudança de estado
+  ├─ app.log_audit_event   [NÃO modificada]
+  │     └─ INSERT audit.audit_events
+  │           └─ TRIGGER AFTER INSERT -> INSERT hooks.outbox   [mesma transação]
+  └─ COMMIT
+```
+
+`audit.audit_events` é a **única** fonte. `hooks.outbox` é uma projeção dela, enfileirada por trigger na própria transação do evento. Rollback faz os três desaparecerem juntos; `hooks.outbox.audit_event_id` é FK para uma tabela que nunca pode ter linhas removidas, então não pode ficar pendurada.
+
+**Polling por watermark de `seq` foi rejeitado como incorreto, não como rudimentar:** `seq` é atribuído sob lock em `audit.chain_heads`, mas as transações **commitam em ordem arbitrária** — um poller que leu até `seq=100` pode perder para sempre um evento `seq=97` que commitou depois. Perda silenciosa.
+
+**`app.log_audit_event` não é modificada.** O principal de máquina viaja como setting transaction-local (`app.actor_principal_id`, o mesmo mecanismo de `app.transition_ok`) e um trigger `BEFORE INSERT` o carimba em `audit.audit_events.actor_principal_id`. Como o hash já foi computado dentro de `log_audit_event` antes do INSERT, essa coluna está **fora** do `event_hash` — mudar a fórmula invalidaria a verificabilidade de todo evento já escrito.
+
+### Regra crítica
+
+`worker.finish_confirmation` **nunca** faz I/O externo. A única adição da Fase F dentro daquela transação é um `INSERT` disparado por trigger, condicionado a um `EXISTS` indexado. Nenhum HTTP, DNS, `pg_net` ou extensão `http` — nem direta, nem indiretamente. `pg_net` e Edge Function foram rejeitados justamente por colocarem essa capacidade dentro do banco, a um `select` de distância da transação de confirmação.
+
+### Envelope
+
+```json
+{ "id": "<uuid do audit event>", "type": "delivery.confirmed", "api_version": "v1",
+  "occurred_at": "...", "sequence": 4821, "organization_id": "...", "company_id": "...",
+  "entity": { "type": "delivery", "id": "..." }, "data": { } }
+```
+
+`sequence` é `audit.audit_events.seq`, cuja unicidade e totalidade por tenant já são garantidas por `audit_events_org_seq_key`. Consumidores ordenam por ele.
+
+`data` é uma **allowlist por tipo de evento** em `hooks.build_envelope`, com omissão como default. Nunca viaja: CPF (completo, hash ou ciphertext), `cpf_masked`, nome, telefone, e-mail, endereço, assinatura, qualquer imagem, `canonical_bytes`, `payload_sha256`, fatores de evidência, OTP, nonce, token, `event_hash`/`prev_hash`, biometria. Em `employee.*`, `changed_fields` carrega **nomes** de campo, jamais valores.
+
+### Catálogo
+
+`delivery.created` · `delivery.issued` · `delivery.confirmed` · `delivery.contested` · `delivery.cancelled` · `ppe.replaced` · `ppe.returned` · `employee.created` · `employee.updated` · `employee.import_completed`
+
+Ausentes, cada um por um motivo:
+- **`delivery.refused`** — nenhum evento tem essa semântica. `DELIVERY_CONTESTED` é um trabalhador contestando com motivo, que é um fato diferente; apelidar um de outro publicaria uma afirmação que o dado não sustenta.
+- **`compliance.changed`** — compliance é derivada sob demanda e nunca materializada. Não existe estado que possa "mudar", e criá-lo significaria uma segunda fonte de verdade ao lado do motor da Fase D.
+
+**Semântica declarada de importação em massa:** `employee.created` vale para operações de entidade única (painel e API). Uma importação emite **um** `employee.import_completed` por lote e **nenhum** evento por colaborador — 20.000 linhas gerariam 20.000 hashes de cadeia e 20.000 entregas HTTP por uma única ação de operador. Reconcilia-se com `GET /api/v1/employees?updated_since=<occurred_at do evento>`.
+
+### Entrega
+
+At-least-once. Deduplicação é responsabilidade do consumidor, por `id` (estável entre retentativas). Ordenação não é garantida por padrão — retentativa com backoff reordena inevitavelmente; o consumidor ordena por `sequence`. `ordered_delivery` é opt-in por endpoint, com head-of-line blocking como custo declarado.
+
+Máximo 12 tentativas, backoff exponencial de 10 s a 6 h com **jitter completo** (`random() * min(cap, 10·2^n)`) — sem jitter, mil entregas que falharam juntas voltam juntas e a retentativa vira o ataque. Timeout de 10 s. `2xx` = sucesso; `3xx` e `4xx` (exceto `429`) = falha permanente; `429`/`5xx`/rede = retentável; esgotado = DLQ, retido 30 dias, com replay manual auditado (`WEBHOOK_REPLAYED`). Vinte falhas **permanentes** consecutivas desativam o endpoint — `5xx` nunca desativa, porque indisponibilidade temporária é o caso normal.
+
+### Assinatura
+
+```
+Selo-Signature: t=<unix_seconds>,v1=<hex hmac_sha256>
+signed_payload  = "<t>" + "." + <bytes exatos do corpo>
+```
+
+O corpo é serializado **uma vez**, guardado, assinado e transmitido — a mesma disciplina de `canonical_bytes`. O timestamp entra na assinatura: sem ele, um payload capturado é replayable para sempre. Verificação: rejeitar se `|now − t| > 300 s`, recomputar sobre o corpo cru antes de qualquer parse, comparar em tempo constante, deduplicar por `Selo-Event-Id`.
+
+Rotação com sobreposição: durante a janela, **as duas assinaturas são enviadas**, o assinante migra, e a antiga sai. Rotacionar sem sobreposição faz todo evento em voo falhar a verificação.
+
+O segredo é AES-256-GCM (`WEBHOOK_SECRET_KEY`, fora do banco), não hash — o runner precisa lê-lo de volta para assinar. Vault também funcionaria; manteve-se uma única disciplina de cripto no código, a mesma de `app.employees.cpf_enc`.
+
+### Política de rede (SSRF)
+
+Um runner de webhook é, por definição, um serviço que faz requisições a URLs fornecidas por usuários. As regras são obrigatórias, aplicadas em **dois** momentos:
+
+1. **Na criação** — somente `https://`, porta 443, sem userinfo, sem literal de IP (v4 e v6), sem sufixos internos.
+2. **Na conexão** — resolver DNS explicitamente, validar **cada** endereço retornado, e conectar ao **IP validado**, sem re-resolver.
+
+O passo 2 não é decoração: DNS rebinding troca a resolução entre a checagem e a conexão, e sem a pinagem toda a lista de faixas bloqueadas é ornamental. Implementado com o hook `lookup` de `node:https` — `fetch` não tem equivalente, e reescrever a URL para um IP quebraria a validação de certificado.
+
+Decisão final por **allowlist**: o endereço precisa ser unicast público global. Faixas bloqueadas incluem `169.254.0.0/16` (o endpoint de metadados de nuvem, alvo canônico), todas as privadas/loopback/CGNAT/reservadas/multicast v4, e `::`/`::1`/`fc00::/7`/`fe80::/10`/`ff00::/8` mais IPv4-mapped revalidado como v4.
+
+**Redirects nunca são seguidos.** `3xx` é falha permanente — seguir um reabre SSRF depois de toda checagem de endereço já ter passado.
+
+### Runner
+
+Vercel Cron (`vercel.json`) a cada minuto, chamando `/api/internal/webhook-runner` com o segredo do agendador; limpeza diária em `/api/internal/maintenance`. Ambas as rotas **falham fechadas** quando nenhum segredo está configurado.
+
+`claim -> HTTP -> report` são três chamadas curtas, então nenhuma transação atravessa I/O de rede e `FOR UPDATE SKIP LOCKED` funciona normalmente a partir de uma função serverless — duas invocações sobrepostas nunca pegam a mesma entrega. Latência p50 esperada de ~30 s (metade do intervalo), declarada ao cliente, não escondida. Cron de 1 minuto exige plano **Vercel Pro**.
+
+Durante indisponibilidade do runner, o outbox acumula de forma durável e drena na retomada; nada se perde. Alerta quando o `PENDING` mais antigo passa de 15 min — é o sinal de que o runner parou, e nada mais no produto falharia.
+
+---
+
+## 25. Divergência registrada: escopo de importação
+
+O roadmap de expansão descreve a Fase F como *"position CSV import, `/api/v1/*`, API keys, webhooks"*, enquanto a §18 da especificação original descreve importação de **colaboradores** — que já existia desde a FASE 1. As duas leituras não coincidem.
+
+**Resolução adotada (decisão do usuário, 2026-09-07):** a Fase F completa o import de colaboradores (resolvendo Cargo → `position_id` e Unidade → `location_id`, e adicionando XLSX). Import de cargos e da matriz cargo×EPI **não** entra automaticamente. A divergência fica registrada aqui em vez de silenciosamente resolvida a favor de uma das leituras.

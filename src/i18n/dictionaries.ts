@@ -547,6 +547,10 @@ const pt = {
   settings: {
     title: "Configurações da organização",
     policyCardTitle: "Política de troca e recursos",
+    integrationsCardTitle: "Integrações",
+    integrationsCardDescription:
+      "Chaves de API e webhooks. Uma chave de API não é um usuário e nunca alcança a confirmação do trabalhador nem o comprovante selado.",
+    integrationsCardLink: "Gerenciar integrações",
     earlyReplacementPolicyLabel: "Troca antecipada de EPI",
     earlyReplacementPolicyAllow: "Permitir sem aviso",
     earlyReplacementPolicyWarn: "Avisar e exigir confirmação",
@@ -1354,6 +1358,10 @@ const en: typeof pt = {
   settings: {
     title: "Organization settings",
     policyCardTitle: "Replacement policy & features",
+    integrationsCardTitle: "Integrations",
+    integrationsCardDescription:
+      "API keys and webhooks. An API key is not a user, and never reaches worker confirmation or the sealed receipt.",
+    integrationsCardLink: "Manage integrations",
     earlyReplacementPolicyLabel: "Early PPE replacement",
     earlyReplacementPolicyAllow: "Allow without a warning",
     earlyReplacementPolicyWarn: "Warn and require confirmation",
