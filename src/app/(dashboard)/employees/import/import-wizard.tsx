@@ -18,7 +18,19 @@ import {
   type ParsedCsvRow,
   type ValidationResult,
 } from "@/lib/csv-import/validate-rows";
-import { commitEmployeeImportChunk, revalidateEmployeesAfterImport } from "./import-actions";
+import {
+  applyReferenceResolution,
+  collectReferenceLabels,
+  type ResolvedRow,
+} from "@/lib/csv-import/resolve-references";
+import { neutralizeFormula, readXlsxRows, XlsxRejectedError } from "@/lib/csv-import/xlsx";
+import {
+  commitEmployeeImportChunk,
+  finishImportRun,
+  resolveImportReferences,
+  revalidateEmployeesAfterImport,
+  startImportRun,
+} from "./import-actions";
 
 // Hard cap mirrors api.import_employees_commit's own limit (batch_too_large, code 54000,
 // supabase/migrations/20260831150200_employee_rpcs.sql) -- refused here with a clear
@@ -40,6 +52,7 @@ function fieldLabels(t: Dict): Record<ImportField, string> {
     email: t.common.email,
     position_title: t.employees.positionLabel,
     department: t.employees.departmentLabel,
+    location: t.employees.importUnitLabel,
   };
 }
 
@@ -53,6 +66,7 @@ const HEADER_GUESSES: Record<ImportField, string[]> = {
   email: ["email", "e-mail"],
   position_title: ["cargo", "funcao", "posicao", "position"],
   department: ["departamento", "setor", "department", "area"],
+  location: ["unidade", "local", "filial", "obra", "site", "location", "unit"],
 };
 
 function normalizeHeader(header: string): string {
@@ -76,9 +90,28 @@ function guessMapping(headers: string[]): ColumnMapping {
 function errorsToCsv(errors: ValidationResult["errors"], t: Dict): string {
   const lines = [`${t.employees.rowLabel},${t.employees.reasonLabel}`];
   for (const e of errors) {
-    lines.push(`${e.rowNumber},"${e.reasons.join("; ").replace(/"/g, '""')}"`);
+    // neutralizeFormula because THIS file is the real formula-injection vector: the reasons
+    // quote values the user uploaded, and they open our export in Excel. A cell starting
+    // with "=" would execute there, in their session, from their own spreadsheet.
+    const reason = neutralizeFormula(e.reasons.join("; ")).replace(/"/g, '""');
+    lines.push(`${e.rowNumber},"${reason}"`);
   }
   return lines.join("\n");
+}
+
+/** XLSX comes back as a raw grid; the CSV path is header-keyed. Converting here keeps ONE
+ * downstream validation path instead of two. */
+function gridToRows(grid: string[][]): { headers: string[]; rows: ParsedCsvRow[] } {
+  const [headerRow, ...dataRows] = grid;
+  const headers = (headerRow ?? []).map((h, i) => (h.trim() === "" ? `Coluna ${i + 1}` : h.trim()));
+  const rows = dataRows.map((cells) => {
+    const row: ParsedCsvRow = {};
+    headers.forEach((header, i) => {
+      row[header] = cells[i] ?? "";
+    });
+    return row;
+  });
+  return { headers, rows };
 }
 
 function downloadCsv(filename: string, content: string) {
@@ -127,6 +160,14 @@ export function ImportWizard({ companyId }: { companyId: string }) {
   const [mapping, setMapping] = useState<ColumnMapping>({});
   const [commitError, setCommitError] = useState<string | null>(null);
   const [progress, setProgress] = useState<CommitProgress | null>(null);
+  const [sourceFormat, setSourceFormat] = useState<"CSV" | "XLSX">("CSV");
+  const [resolving, setResolving] = useState(false);
+  /** True when at least one chunk committed and at least one did not. Kept separate from
+   * commitError so the UI can never show an unqualified "concluída" over a partial file. */
+  const [partial, setPartial] = useState(false);
+  /** Rows rejected because their Cargo/Unidade did not resolve. Surfaced alongside the
+   * validation errors so the user sees every reason a row was left out, in one place. */
+  const [resolutionErrors, setResolutionErrors] = useState<ValidationResult["errors"]>([]);
 
   const mappingComplete = REQUIRED_IMPORT_FIELDS.every((f) => !!mapping[f]);
   const validation = useMemo(
@@ -134,12 +175,57 @@ export function ImportWizard({ companyId }: { companyId: string }) {
     [mappingComplete, rows, mapping],
   );
 
+  function describeXlsxRejection(reason: XlsxRejectedError["reason"]): string {
+    switch (reason) {
+      case "file_too_large":
+        return t.employees.importXlsxTooLarge;
+      case "not_a_zip":
+        return t.employees.importXlsxNotAZip;
+      case "uncompressed_too_large":
+      case "compression_ratio":
+      case "too_many_entries":
+        return t.employees.importXlsxBomb;
+      case "too_many_rows":
+        return t.employees.importXlsxTooManyRows;
+      default:
+        return t.employees.importXlsxCorrupt;
+    }
+  }
+
+  async function handleXlsx(file: File) {
+    try {
+      const grid = await readXlsxRows(file);
+      const { headers: xlsxHeaders, rows: xlsxRows } = gridToRows(grid);
+      if (xlsxHeaders.length === 0) {
+        setParseError(t.employees.importNoColumnsError);
+        return;
+      }
+      setSourceFormat("XLSX");
+      setHeaders(xlsxHeaders);
+      setRows(xlsxRows);
+      setMapping(guessMapping(xlsxHeaders));
+      setStep("map");
+    } catch (error) {
+      setParseError(
+        error instanceof XlsxRejectedError
+          ? `${t.employees.importXlsxRejected}: ${describeXlsxRejection(error.reason)}`
+          : `${t.employees.importReadFailedPrefix} ${(error as Error).message}`,
+      );
+    }
+  }
+
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setParseError(null);
     setFileName(file.name);
 
+    if (/\.xlsx$/i.test(file.name)) {
+      void handleXlsx(file);
+      return;
+    }
+
+    setSourceFormat("CSV");
     Papa.parse<ParsedCsvRow>(file, {
       header: true,
       skipEmptyLines: true,
@@ -162,11 +248,60 @@ export function ImportWizard({ companyId }: { companyId: string }) {
   async function commitImport() {
     if (!validation) return;
     setCommitError(null);
+    setPartial(false);
+
+    // Resolve Cargo/Unidade BEFORE anything is written. A label that does not match becomes
+    // a row error the user fixes; nothing is ever created on their behalf.
+    let rowsToImport: ResolvedRow[] = validation.validRows.map((r) => ({
+      ...r,
+      positionId: null,
+      locationId: null,
+    }));
+    let referenceErrors: ValidationResult["errors"] = [];
+
+    const labels = collectReferenceLabels(validation.validRows);
+    if (labels.titles.length > 0 || labels.locationRefs.length > 0) {
+      setResolving(true);
+      const resolved = await resolveImportReferences(companyId, labels.titles, labels.locationRefs);
+      setResolving(false);
+      if (!resolved.ok) {
+        setCommitError(resolved.error);
+        return;
+      }
+      const applied = applyReferenceResolution(validation.validRows, resolved.resolutions);
+      rowsToImport = applied.resolvedRows;
+      referenceErrors = applied.errors;
+    }
+
+    if (rowsToImport.length === 0) {
+      setResolutionErrors(referenceErrors);
+      setCommitError(t.employees.importReferencesFailed);
+      return;
+    }
+    setResolutionErrors(referenceErrors);
     setStep("committing");
 
-    const chunks: (typeof validation.validRows)[] = [];
-    for (let i = 0; i < validation.validRows.length; i += CHUNK_SIZE) {
-      chunks.push(validation.validRows.slice(i, i + CHUNK_SIZE));
+    const chunks: ResolvedRow[][] = [];
+    for (let i = 0; i < rowsToImport.length; i += CHUNK_SIZE) {
+      chunks.push(rowsToImport.slice(i, i + CHUNK_SIZE));
+    }
+
+    // Opened before the first chunk so a crash mid-import still leaves an inspectable run.
+    const run = await startImportRun({
+      companyId,
+      sourceFormat,
+      sourceFilename: fileName,
+      columnMapping: mapping,
+      totalRows: rows.length,
+      validRows: rowsToImport.length,
+      errorRows: validation.errors.length + referenceErrors.length,
+      chunkSize: CHUNK_SIZE,
+      chunkCount: chunks.length,
+    });
+    if (!run.ok) {
+      setCommitError(run.error);
+      setStep("done");
+      return;
     }
 
     let created = 0;
@@ -186,7 +321,15 @@ export function ImportWizard({ companyId }: { companyId: string }) {
           email: r.email,
           positionTitle: r.positionTitle,
           department: r.department,
+          positionId: r.positionId,
+          locationId: r.locationId,
         })),
+        {
+          importRunId: run.importRunId,
+          chunkIndex: i,
+          rowFrom: chunk[0]?.rowNumber ?? 0,
+          rowTo: chunk[chunk.length - 1]?.rowNumber ?? 0,
+        },
       );
 
       if (!result.ok) {
@@ -194,6 +337,10 @@ export function ImportWizard({ companyId }: { companyId: string }) {
           `${result.error} (${t.employees.batch.toLowerCase()} ${i + 1} ${t.employees.ofConnector} ${chunks.length} -- ${t.employees.batchErrorNote})`,
         );
         setProgress({ processedChunks: i, totalChunks: chunks.length, created, updated, skipped });
+        // The run's real status comes from what actually committed in the database, not from
+        // what this loop believes -- so a failure here still records PARTIAL truthfully.
+        const finished = await finishImportRun(run.importRunId);
+        setPartial(finished.ok ? finished.status === "PARTIAL" : i > 0);
         setStep("done");
         return;
       }
@@ -204,6 +351,8 @@ export function ImportWizard({ companyId }: { companyId: string }) {
       setProgress({ processedChunks: i + 1, totalChunks: chunks.length, created, updated, skipped });
     }
 
+    const finished = await finishImportRun(run.importRunId);
+    setPartial(finished.ok && finished.status === "PARTIAL");
     await revalidateEmployeesAfterImport();
     setStep("done");
   }
@@ -225,7 +374,7 @@ export function ImportWizard({ companyId }: { companyId: string }) {
           <p className="text-[13px] text-muted-foreground">{t.employees.importStep1Description}</p>
           <input
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             onChange={handleFileChange}
             className="text-sm file:mr-3 file:cursor-pointer file:rounded-full file:border-0 file:bg-primary file:px-4 file:py-2 file:text-sm file:font-extrabold file:text-primary-foreground"
           />
@@ -331,19 +480,59 @@ export function ImportWizard({ companyId }: { companyId: string }) {
           <p className="text-[13px] text-muted-foreground">
             {progress
               ? `${t.employees.batch} ${progress.processedChunks} ${t.employees.ofConnector} ${progress.totalChunks}…`
-              : t.employees.preparing}
+              : resolving ? t.employees.importResolvingReferences : t.employees.preparing}
           </p>
         </Panel>
       ) : null}
 
       {step === "done" ? (
-        <Panel className="flex flex-col items-start gap-3.5">
-          <PanelTitle>{t.employees.importComplete}</PanelTitle>
+        <Panel tone={partial ? "destructive" : undefined} className="flex flex-col items-start gap-3.5">
+          <PanelTitle>{partial ? t.employees.importPartialTitle : t.employees.importComplete}</PanelTitle>
+          {partial ? (
+            <>
+              <p className="text-[13.5px]">{t.employees.importPartialDescription}</p>
+              {progress ? (
+                <p className="text-[13px] font-bold tabular-nums">
+                  {progress.processedChunks} {t.employees.importChunksCommitted} {progress.totalChunks}
+                </p>
+              ) : null}
+              <p className="text-[12.5px] text-muted-foreground">{t.employees.importResumeHint}</p>
+            </>
+          ) : null}
           <p className="text-[13.5px]">
             {progress?.created ?? 0} {t.employees.createdSuffix} {progress?.updated ?? 0} {t.employees.updatedSuffix}
             {progress && progress.skipped > 0 ? `, ${progress.skipped} ${t.employees.skippedSuffix}` : ""}.
           </p>
           {commitError ? <p className="text-sm text-destructive">{commitError}</p> : null}
+          {resolutionErrors.length > 0 ? (
+            <div className="flex flex-col items-start gap-2">
+              <p className="text-[13px] font-bold text-destructive">
+                {resolutionErrors.length} {t.employees.importRowsWithProblems}
+              </p>
+              <ul className="flex flex-col gap-1 text-[12.5px]">
+                {resolutionErrors.slice(0, 4).map((error) => (
+                  <li key={error.rowNumber}>
+                    <span className="font-bold">
+                      {t.employees.rowLabel} {error.rowNumber}
+                    </span>{" "}
+                    — {error.reasons.join("; ")}
+                  </li>
+                ))}
+                {resolutionErrors.length > 4 ? (
+                  <li className="text-muted-foreground">
+                    + {resolutionErrors.length - 4} {t.employees.importMoreRows}
+                  </li>
+                ) : null}
+              </ul>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => downloadCsv("erros-importacao.csv", errorsToCsv(resolutionErrors, t))}
+              >
+                {t.employees.downloadErrorReport}
+              </Button>
+            </div>
+          ) : null}
           <Button asChild size="lg">
             <Link href={`/employees?company=${companyId}`}>{t.companies.viewEmployees}</Link>
           </Button>

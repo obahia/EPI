@@ -9,6 +9,7 @@ import { hashCpf, encryptCpf } from "@/lib/crypto/cpf-secrets";
 import { describeRpcError } from "@/lib/supabase/rpc-error";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary } from "@/i18n/dictionaries";
+import type { ReferenceResolution } from "@/lib/csv-import/resolve-references";
 
 // The RPC itself hard-caps at 20,000 rows/call (batch_too_large, 54000) -- this is a much
 // smaller per-request ceiling so a single Server Action invocation's body stays well under
@@ -25,6 +26,11 @@ const rowSchema = z.object({
   email: z.string().trim().nullable().optional(),
   positionTitle: z.string().trim().nullable().optional(),
   department: z.string().trim().nullable().optional(),
+  // Phase F: already resolved to ids during the preview step. Re-validated inside
+  // api.import_employees_commit against the tenant anyway -- the wizard is a UX gate,
+  // never the security boundary.
+  positionId: z.uuid().nullable().optional(),
+  locationId: z.uuid().nullable().optional(),
 });
 
 export type ImportCommitRow = z.infer<typeof rowSchema>;
@@ -46,6 +52,7 @@ export type ImportChunkResult =
 export async function commitEmployeeImportChunk(
   companyId: string,
   rows: ImportCommitRow[],
+  run?: { importRunId: string; chunkIndex: number; rowFrom: number; rowTo: number },
 ): Promise<ImportChunkResult> {
   const t = getDictionary(await getLocale());
   if (!z.uuid().safeParse(companyId).success) {
@@ -91,6 +98,8 @@ export async function commitEmployeeImportChunk(
       email: parsed.data.email || null,
       position_title: parsed.data.positionTitle || null,
       department: parsed.data.department || null,
+      position_id: parsed.data.positionId ?? null,
+      location_id: parsed.data.locationId ?? null,
     });
   }
 
@@ -102,6 +111,10 @@ export async function commitEmployeeImportChunk(
   const { data, error } = await supabase.schema("api").rpc("import_employees_commit", {
     p_company_id: companyId,
     p_rows: payload,
+    p_import_run_id: run?.importRunId ?? null,
+    p_chunk_index: run?.chunkIndex ?? null,
+    p_row_from: run?.rowFrom ?? null,
+    p_row_to: run?.rowTo ?? null,
   });
 
   if (error) {
@@ -121,4 +134,119 @@ export async function commitEmployeeImportChunk(
  * so the wizard doesn't need to import next/cache directly. */
 export async function revalidateEmployeesAfterImport(): Promise<void> {
   revalidatePath("/employees");
+}
+
+// ---------------------------------------------------------------------------------------
+// Phase F: reference resolution and durable run tracking
+// ---------------------------------------------------------------------------------------
+
+export type ResolveReferencesResult =
+  | { ok: true; resolutions: ReferenceResolution[] }
+  | { ok: false; error: string };
+
+/**
+ * Resolves the distinct Cargo/Unidade labels of a file during the PREVIEW step, so a label
+ * that does not match becomes a visible row error before anything is written. Never creates
+ * a position or a location -- an unmatched label is the user's to fix.
+ */
+export async function resolveImportReferences(
+  companyId: string,
+  titles: string[],
+  locationRefs: string[],
+): Promise<ResolveReferencesResult> {
+  const t = getDictionary(await getLocale());
+  if (!z.uuid().safeParse(companyId).success) {
+    return { ok: false, error: t.employees.invalidCompany };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.schema("api").rpc("resolve_import_references", {
+    p_company_id: companyId,
+    // Capped so a pathological file cannot turn one preview into an unbounded query. A file
+    // with more than 500 distinct job titles is a mapping mistake, not a real payroll.
+    p_titles: titles.slice(0, 500),
+    p_location_refs: locationRefs.slice(0, 500),
+  });
+
+  if (error) {
+    return { ok: false, error: describeRpcError(error, t.employees.importReferencesFailed) };
+  }
+
+  const rows = (data ?? []) as {
+    kind: "POSITION" | "LOCATION";
+    raw: string;
+    resolved_id: string | null;
+    outcome: "RESOLVED" | "NOT_FOUND" | "AMBIGUOUS" | "INACTIVE";
+    suggestions: string[] | null;
+  }[];
+
+  return {
+    ok: true,
+    resolutions: rows.map((r) => ({
+      kind: r.kind,
+      raw: r.raw,
+      resolvedId: r.resolved_id,
+      outcome: r.outcome,
+      suggestions: r.suggestions,
+    })),
+  };
+}
+
+export type StartImportRunResult = { ok: true; importRunId: string } | { ok: false; error: string };
+
+/**
+ * Opens the durable record of an import. Without it, "which 4000 of my 6000 rows actually
+ * landed?" has no answer once the browser tab is gone -- and mass employee creation left no
+ * audit trail at all before this phase.
+ */
+export async function startImportRun(input: {
+  companyId: string;
+  sourceFormat: "CSV" | "XLSX";
+  sourceFilename: string | null;
+  columnMapping: Record<string, string | undefined>;
+  totalRows: number;
+  validRows: number;
+  errorRows: number;
+  chunkSize: number;
+  chunkCount: number;
+}): Promise<StartImportRunResult> {
+  const t = getDictionary(await getLocale());
+  if (!z.uuid().safeParse(input.companyId).success) {
+    return { ok: false, error: t.employees.invalidCompany };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.schema("api").rpc("start_import_run", {
+    p_company_id: input.companyId,
+    p_source_format: input.sourceFormat,
+    p_source_filename: input.sourceFilename,
+    p_source_sha256_b64: null,
+    p_column_mapping: input.columnMapping,
+    p_total_rows: input.totalRows,
+    p_valid_rows: input.validRows,
+    p_error_rows: input.errorRows,
+    p_chunk_size: input.chunkSize,
+    p_chunk_count: input.chunkCount,
+  });
+
+  if (error) {
+    return { ok: false, error: describeRpcError(error, t.employees.importChunkFailed) };
+  }
+  return { ok: true, importRunId: data as string };
+}
+
+/** Marks the run COMPLETED, PARTIAL or ABANDONED from what actually committed -- never from
+ * what the browser believes happened. */
+export async function finishImportRun(
+  importRunId: string,
+): Promise<{ ok: true; status: string } | { ok: false; error: string }> {
+  const t = getDictionary(await getLocale());
+  const supabase = await createClient();
+  const { data, error } = await supabase.schema("api").rpc("finish_import_run", {
+    p_import_run_id: importRunId,
+  });
+  if (error) {
+    return { ok: false, error: describeRpcError(error, t.employees.importChunkFailed) };
+  }
+  return { ok: true, status: data as string };
 }

@@ -18,6 +18,10 @@ export const IMPORT_FIELDS = [
   "email",
   "position_title",
   "department",
+  // Phase F: the spec's §18 field list is Nome, CPF, Matrícula, Cargo, Unidade, Telefone,
+  // Email -- "Unidade" was the one that had no column here at all, so an import could never
+  // populate app.employees.location_id and therefore never place anyone in a stock bucket.
+  "location",
 ] as const;
 
 export type ImportField = (typeof IMPORT_FIELDS)[number];
@@ -39,6 +43,9 @@ export type ValidatedRow = {
   email: string | null;
   positionTitle: string | null;
   department: string | null;
+  /** Raw spreadsheet label. Resolved to app.locations.id in a separate pass -- see
+   * applyReferenceResolution, which needs a database round trip this pure module must not make. */
+  location: string | null;
 };
 
 export type RowError = {
@@ -83,6 +90,7 @@ export function validateImportRows(rows: ParsedCsvRow[], mapping: ColumnMapping)
     const email = getField(row, mapping, "email") || null;
     const positionTitle = getField(row, mapping, "position_title") || null;
     const department = getField(row, mapping, "department") || null;
+    const location = getField(row, mapping, "location") || null;
 
     if (!fullName) reasons.push("Nome ausente");
 
@@ -124,6 +132,7 @@ export function validateImportRows(rows: ParsedCsvRow[], mapping: ColumnMapping)
       email,
       positionTitle,
       department,
+      location,
     });
   });
 
