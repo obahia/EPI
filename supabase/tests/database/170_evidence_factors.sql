@@ -329,6 +329,12 @@ select ok(
 -- 5. Post-seal immutability of factors and evidence
 -- ===========================================================================================
 
+-- As the TENANT, not as the owner: this suite runs as the unrestricted owner by default, and
+-- an owner bypasses grants entirely -- asserting immutability without impersonating
+-- `authenticated` would prove nothing about what a real caller can do.
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"88888888-8888-8888-8888-888888888801","role":"authenticated"}';
+
 select throws_ok(
   format($$ update app.identity_verifications set result = 'FAIL' where id = %L $$,
     (select id from fixture_ids where label = 'factor_identity')),
@@ -345,6 +351,8 @@ select throws_ok(
   '42501', NULL,
   'a factor cannot be appended after the seal either'
 );
+
+reset role;
 
 -- ===========================================================================================
 -- 6. Retry / idempotency -- the consumed nonce blocks a replayed submission
@@ -370,7 +378,7 @@ begin
   insert into fixture_ids values ('retry_result', null, v_result);
 end $$;
 
-select like(
+select alike(
   (select extra from fixture_ids where label = 'retry_result'),
   'REJECTED:%',
   'a replayed submission after the seal is rejected, never processed again'
