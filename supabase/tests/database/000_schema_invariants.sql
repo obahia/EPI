@@ -92,7 +92,12 @@ select is(
 --    way that fails loudly if someone edits config.toml without reading this test --
 --    the actual enforcement is in supabase/config.toml, not in the database itself, so
 --    this is a reminder assertion rather than a database-level guarantee.
-select pass('PostgREST schema exposure is enforced in supabase/config.toml (api.schemas = ["api","worker","m2m_rpc","graphql_public"]) -- verify that file has not regressed to include app/authz/evidence/audit/integ/m2m/hooks. m2m_rpc is exposed but granted to service_role only; ops_rpc is NOT exposed and is reached through the internal runner route.');
+-- NOTE: config.toml governs the LOCAL and CI stacks only. The hosted project's exposed
+-- schemas are a dashboard setting, and applying migrations does NOT change it -- verified
+-- against epi-dev on 2026-09-07, where PostgREST answered PGRST106 "Only the following
+-- schemas are exposed: graphql_public, api, worker" for both m2m_rpc and ops_rpc. Adding a
+-- schema here is therefore only half the deployment step.
+select pass('PostgREST schema exposure is enforced in supabase/config.toml (api.schemas = ["api","worker","m2m_rpc","ops_rpc","graphql_public"]) -- verify that file has not regressed to include app/authz/evidence/audit/integ/m2m/hooks. m2m_rpc and ops_rpc are exposed but reachable by service_role only (asserted below); m2m and hooks are never exposed.');
 
 -- 7. Phase F: authenticated has no USAGE on the machine or operator planes either. anon is
 --    covered by assertion 4; this is the separate case of a logged-in human, who has no

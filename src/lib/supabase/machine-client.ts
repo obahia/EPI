@@ -21,6 +21,13 @@ import { getSupabaseSecretKey, getSupabaseUrl } from "./env";
  *
  * ops_rpc is the exception: it operates on our own webhook queue, where there is no tenant
  * to impersonate, and the internal route that calls it validates the scheduler secret first.
+ *
+ * DEPLOYMENT NOTE. Both m2m_rpc and ops_rpc must be listed in the project's exposed schemas
+ * or every call here fails with PGRST106. supabase/config.toml covers the LOCAL and CI
+ * stacks only -- the hosted project's list is a dashboard setting (Settings > API > Exposed
+ * schemas) that applying migrations does not touch. Verified the hard way against epi-dev:
+ * with all ten Phase F migrations applied, PostgREST still answered
+ * "Only the following schemas are exposed: graphql_public, api, worker".
  */
 export function createMachineClient() {
   return createSupabaseClient(getSupabaseUrl(), getSupabaseSecretKey(), {
