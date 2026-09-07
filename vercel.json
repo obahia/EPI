@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["gru1"],
+  "crons": [
+    {
+      "path": "/api/internal/webhook-runner",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/internal/maintenance",
+      "schedule": "0 4 * * *"
+    }
+  ]
+}

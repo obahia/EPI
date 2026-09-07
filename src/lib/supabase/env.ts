@@ -22,10 +22,20 @@ export function getSupabasePublishableKey(): string {
   return required("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
 }
 
-// No getSupabaseSecretKey() here on purpose. Both src/lib/supabase/server.ts and
-// client.ts say explicitly that the secret key (RLS-bypassing) is reserved for a future
-// admin/cross-tenant client that FASE 3+ never actually built -- every real query in this
-// app goes through the publishable key plus the caller's own session, with RLS enforcing
-// tenancy. A getter with no caller is still a secret loaded into every environment for
-// nothing; add it back here, next to the client that will actually call it, if that
-// admin path is ever built.
+/**
+ * Added in Phase F, which is the "if that admin path is ever built" this file previously
+ * described. It is NOT an admin client and it is not RLS-bypassing in any useful sense:
+ * service_role holds USAGE on no business schema of this project (verified -- the only
+ * `grant usage on schema` statements in the migrations cover api -> anon/authenticated,
+ * app+auth_ctx -> authenticated, worker -> anon), so the secret key can reach exactly two
+ * schemas, m2m_rpc and ops_rpc, and every function in both refuses to do anything without
+ * separately verified API-key material or the scheduler secret.
+ *
+ * In other words the secret key is a TRANSPORT credential here, not an authorization one --
+ * which is the whole point of resolving the machine principal inside Postgres from the key
+ * hash rather than trusting whoever holds the database credential. Only
+ * src/lib/supabase/machine-client.ts may call this.
+ */
+export function getSupabaseSecretKey(): string {
+  return required("SUPABASE_SECRET_KEY");
+}
