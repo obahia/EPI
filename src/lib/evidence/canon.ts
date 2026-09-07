@@ -27,6 +27,14 @@ import canonicalizeJson from "canonicalize";
 
 export const EPI_CANON_VERSION = "epi-canon/1";
 
+/** Phase E (spec §16): same serialization rules as v1 -- JCS, NFC, no float, no null, ordered
+ * arrays -- differing only in DOCUMENT SHAPE (a `factors` array replaces the fixed
+ * identity.method + top-level signature). The rules below are untouched, so a v1 payload
+ * still produces byte-identical output; v1's golden vectors are the permanent proof. */
+export const EPI_CANON_VERSION_2 = "epi-canon/2";
+
+const KNOWN_CANON_VERSIONS: ReadonlySet<string> = new Set([EPI_CANON_VERSION, EPI_CANON_VERSION_2]);
+
 // Character codes forbidden inside any string this module hashes -- checked by numeric
 // charCode comparison, never by embedding the literal (often invisible) characters in a
 // regex source, which is both unreviewable in a diff and fragile to editor/encoding
@@ -137,8 +145,11 @@ export type CanonicalizedPayload = { canonicalBytes: Buffer; sha256: Buffer };
  * the same logical payload always produces the same bytes and hash, in any process, forever
  * (see canon.test.ts's golden vectors). */
 export function canonicalizeEvidencePayload(payload: Record<string, unknown>): CanonicalizedPayload {
-  if (payload["_canon"] !== EPI_CANON_VERSION) {
-    throw new Error(`epi-canon/1: payload._canon must be exactly "${EPI_CANON_VERSION}"`);
+  const canon = payload["_canon"];
+  if (typeof canon !== "string" || !KNOWN_CANON_VERSIONS.has(canon)) {
+    throw new Error(
+      `epi-canon: payload._canon must be one of ${[...KNOWN_CANON_VERSIONS].map((v) => `"${v}"`).join(", ")}`,
+    );
   }
   const normalized = normalize(payload, "$");
   const json = canonicalizeJson(normalized);

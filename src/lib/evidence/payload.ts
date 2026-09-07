@@ -1,7 +1,8 @@
 import "server-only";
-import { EPI_CANON_VERSION } from "./canon";
+import { EPI_CANON_VERSION, EPI_CANON_VERSION_2 } from "./canon";
 import type { AssuranceLevel, IdentityCheckMethod } from "@/lib/identity/provider";
 import type { EvidenceSignature } from "./signature";
+import { sortFactorsCanonically, type EvidenceFactor } from "./factors";
 
 export type EvidenceSourceItem = {
   line_no: number;
@@ -73,6 +74,83 @@ export function buildEvidencePayload(params: {
     identity: { method, achieved_assurance_level: achievedAssuranceLevel },
     confirmed_at_utc: confirmedAtUtc,
     signature,
+  };
+  if (source.note) payload.note = source.note;
+
+  return payload;
+}
+
+/**
+ * epi-canon/2 (Phase E, spec §16). Differences from v1, and ONLY these:
+ *  - `_canon` is epi-canon/2;
+ *  - `identity` keeps `achieved_assurance_level` (a derived attribute of the confirmation) but
+ *    loses `method`, which now belongs to the identity FACTOR;
+ *  - the top-level `signature` is gone -- the drawn signature lives inside its
+ *    DECLARATION_SIGNATURE factor, in exactly one place, which is its authority;
+ *  - `factors[]` is added, in the canonical order sortFactorsCanonically defines.
+ *
+ * Everything else -- business fields, declaration_text, confirmed_at_utc, the omit-absent-keys
+ * rule -- is identical to v1. buildEvidencePayload above is NOT touched: existing seals stay
+ * byte-for-byte valid and their golden vectors keep passing.
+ */
+export function buildEvidencePayloadV2(params: {
+  source: EvidenceSource;
+  confirmationRequestId: string;
+  achievedAssuranceLevel: AssuranceLevel;
+  confirmedAtUtc: string;
+  factors: readonly EvidenceFactor[];
+}): Record<string, unknown> {
+  const { source, confirmationRequestId, achievedAssuranceLevel, confirmedAtUtc, factors } = params;
+
+  if (factors.length === 0) {
+    throw new Error("epi-canon/2: a sealed confirmation must carry at least one accepted factor");
+  }
+
+  const items = source.items.map((item) => {
+    const out: Record<string, unknown> = {
+      line_no: item.line_no,
+      epi_name: item.epi_name,
+      ca_number: item.ca_number,
+      quantity: item.quantity,
+      unit: item.unit,
+    };
+    if (item.manufacturer) out.manufacturer = item.manufacturer;
+    if (item.model) out.model = item.model;
+    return out;
+  });
+
+  const company: Record<string, unknown> = { legal_name: source.company_legal_name };
+  if (source.company_cnpj) company.cnpj = source.company_cnpj;
+
+  // Re-sorted here rather than trusting the caller: the canonical bytes must not depend on the
+  // order a caller happened to assemble the array in (canon.ts rule 5 -- this module never
+  // sorts arrays, so the ordering contract has to be applied before it).
+  const orderedFactors = sortFactorsCanonically(factors).map((factor) => {
+    const out: Record<string, unknown> = {
+      id: factor.id,
+      type: factor.type,
+      provider: factor.provider,
+      result: factor.result,
+      occurred_at_utc: factor.occurred_at_utc,
+    };
+    if (factor.method) out.method = factor.method;
+    if (factor.metadata && Object.keys(factor.metadata).length > 0) out.metadata = factor.metadata;
+    if (factor.signature) out.signature = factor.signature;
+    return out;
+  });
+
+  const payload: Record<string, unknown> = {
+    _canon: EPI_CANON_VERSION_2,
+    delivery_id: source.delivery_id,
+    confirmation_request_id: confirmationRequestId,
+    company,
+    employee: { full_name: source.employee_full_name, cpf_masked: source.employee_cpf_masked },
+    delivery_date: source.delivery_date,
+    items,
+    declaration_text: `Eu, ${source.employee_full_name}, declaro que recebi os equipamentos de proteção individual (EPI) listados neste documento, entregues por ${source.company_legal_name}.`,
+    identity: { achieved_assurance_level: achievedAssuranceLevel },
+    confirmed_at_utc: confirmedAtUtc,
+    factors: orderedFactors,
   };
   if (source.note) payload.note = source.note;
 

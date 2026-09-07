@@ -9,7 +9,8 @@ import { describeWorkerRpcError } from "@/lib/supabase/worker-rpc-error";
 import { getIdentityProvider } from "@/lib/identity/registry";
 import type { AssuranceLevel } from "@/lib/identity/provider";
 import { canonicalizeEvidencePayload, formatTimestampUtc } from "@/lib/evidence/canon";
-import { buildEvidencePayload, type EvidenceSource } from "@/lib/evidence/payload";
+import { buildEvidencePayloadV2, type EvidenceSource } from "@/lib/evidence/payload";
+import { buildConfirmationFactors, factorsForRpc } from "@/lib/evidence/factors";
 import { parseSignatureDataUrl } from "@/lib/evidence/signature";
 
 /**
@@ -101,7 +102,14 @@ export async function submitConfirm(_prevState: ConfirmState, formData: FormData
     p_canonical_bytes_b64: string | null;
     p_payload_sha256_b64: string | null;
     p_confirmed_at_utc: string | null;
-  } = { p_payload: null, p_canonical_bytes_b64: null, p_payload_sha256_b64: null, p_confirmed_at_utc: null };
+    p_factors: unknown[] | null;
+  } = {
+    p_payload: null,
+    p_canonical_bytes_b64: null,
+    p_payload_sha256_b64: null,
+    p_confirmed_at_utc: null,
+    p_factors: null,
+  };
 
   if (identityPassed) {
     const { data: sourceData, error: sourceError } = await supabase
@@ -116,13 +124,25 @@ export async function submitConfirm(_prevState: ConfirmState, formData: FormData
 
     const source = sourceData as unknown as EvidenceSource;
     const confirmedAtUtc = formatTimestampUtc(new Date());
-    const payload = buildEvidencePayload({
+
+    // Phase E: the factor ids and instants are generated exactly once, here. The SAME values
+    // are hashed into the canonical payload and handed to the RPC for persistence -- the
+    // sealed bytes and the relational rows can never disagree about a uuid or a timestamp.
+    // Both observations happened within this single confirm request, so they share
+    // confirmedAtUtc as their instant; the canonical order then falls to (type, id).
+    const factors = buildConfirmationFactors({
+      method: identityMethod!,
+      identityOccurredAtUtc: confirmedAtUtc,
+      signature,
+      signatureOccurredAtUtc: confirmedAtUtc,
+    });
+
+    const payload = buildEvidencePayloadV2({
       source,
       confirmationRequestId: viewId,
-      method: identityMethod!,
       achievedAssuranceLevel: requiredAssuranceLevel,
       confirmedAtUtc,
-      signature,
+      factors,
     });
     const { canonicalBytes, sha256 } = canonicalizeEvidencePayload(payload);
 
@@ -131,6 +151,7 @@ export async function submitConfirm(_prevState: ConfirmState, formData: FormData
       p_canonical_bytes_b64: canonicalBytes.toString("base64"),
       p_payload_sha256_b64: sha256.toString("base64"),
       p_confirmed_at_utc: confirmedAtUtc,
+      p_factors: factorsForRpc(factors),
     };
   }
 
