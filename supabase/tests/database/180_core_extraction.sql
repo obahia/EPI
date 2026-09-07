@@ -14,7 +14,7 @@ create extension if not exists pgtap with schema extensions;
 
 begin;
 
-select plan(17);
+select plan(19);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -199,6 +199,41 @@ select is(
     join fixture_ids f on f.label = 'employee_f' and f.id = e.id),
   'Maria Extração Silva',
   'api.update_employee still updates through the extracted core'
+);
+
+-- The two assertions below exist because of a real regression: `v_changed || 'full_name'`
+-- with an untyped literal made Postgres resolve `anyarray || anyarray` and try to parse the
+-- literal as an array, so EVERY field-changing update raised. It was caught by suite 140,
+-- but only after the fact -- nothing here pinned the CONTENT of changed_fields, and that
+-- content is the whole point of the event.
+select is(
+  (select a.data->'changed_fields' from audit.audit_events a
+    join fixture_ids f on f.label = 'employee_f' and f.id = a.entity_id
+   where a.event_type = 'EMPLOYEE_UPDATED'),
+  '["full_name", "registration_number"]'::jsonb,
+  'EMPLOYEE_UPDATED lists exactly the field NAMES that changed -- never their values, and never a field that did not change'
+);
+
+-- Repeating the identical call must emit nothing at all. Without this, a client polling
+-- PATCH in a loop produces an unbounded stream of events saying nothing happened, and once
+-- webhooks exist, delivers every one of them.
+do $$
+declare v_employee_id uuid := (select id from fixture_ids where label = 'employee_f');
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claims', '{"sub":"f0000000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+  perform api.update_employee(
+    v_employee_id, 'Maria Extração Silva', 'MAT-F-2', null, null, null, null, 'ACTIVE'
+  );
+  reset role;
+end $$;
+
+select is(
+  (select count(*)::int from audit.audit_events a
+    join fixture_ids f on f.label = 'employee_f' and f.id = a.entity_id
+   where a.event_type = 'EMPLOYEE_UPDATED'),
+  1,
+  'a no-op update emits NO second event'
 );
 
 -- ---------------------------------------------------------------------------

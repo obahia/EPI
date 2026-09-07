@@ -64,7 +64,10 @@ begin
     array['employees:read', 'deliveries:read']) into v_principal;
   insert into fx values ('principal', v_principal);
 
-  perform api.create_api_key(v_principal, 'PANELPANELPANEL1',
+  -- 'PANELPANELPANEL1' was rejected by api_keys_key_id_check: Crockford base32 excludes
+  -- I, L, O and U so a key read aloud cannot be mistyped into a different valid key, and
+  -- "PANEL" contains an L. The fixture violated the very constraint this phase added.
+  perform api.create_api_key(v_principal, 'PANEKPANEKPANEK1',
     encode(extensions.digest('panel-secret', 'sha256'), 'base64'), 'live', null);
 
   select api.create_webhook_endpoint(
