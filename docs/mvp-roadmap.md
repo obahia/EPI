@@ -238,3 +238,30 @@ Escopo: §18 (importação), §19 (API pública), §20 (webhooks) da especifica�
 - `delivery.refused` (nenhum evento tem essa semântica) e `compliance.changed` (compliance é derivada; materializá-la criaria uma segunda fonte de verdade).
 - `X-RateLimit-Remaining` em respostas de sucesso.
 - Criação automática de cargo/unidade no import — proibida, sem opt-in.
+
+### FASE F — resultado do benchmark do outbox (CI run #29, Postgres real)
+
+Executado em `.github/workflows/ci.yml`, job `database`, com `BENCH_REPEATS=3`, `BENCH_SEQUENTIAL_N=200`, `BENCH_CONCURRENT_N=240`. Primeira repetição descartada como aquecimento; medianas entre repetições.
+
+| Config | S3 seq p50 | S3 seq p95 | S3 seq p99 | S4 conc p95 | tx/s | outbox após |
+|---|---|---|---|---|---|---|
+| **B0** sem trigger (baseline) | 0,575 ms | 0,689 ms | 0,896 ms | 13,82 ms | 1661 | 0 |
+| **B1** trigger, zero endpoints | 0,568 ms | 0,681 ms | 0,953 ms | 13,98 ms | 1716 | 0 |
+| **B2** trigger, 1 endpoint, runner off | 0,603 ms | 0,762 ms | 0,921 ms | 13,84 ms | 1567 | 1320 |
+| **B3** B2 + backlog, runner off | 0,586 ms | 0,755 ms | 0,952 ms | 13,16 ms | 1593 | 5280 |
+
+**B1 — o caso que 100% dos tenants pagam hoje.** p95 sequencial **−1,2%**, throughput **+3,3%**, ambos *melhores* que o baseline. Isso é a assinatura de ruído, não de ganho: a guarda `EXISTS` sobre `hooks.endpoints` não tem custo mensurável. Nenhuma linha de outbox é escrita (`outbox após = 0`), confirmando que o caminho barato é de fato o caminho tomado.
+
+**Piso de ruído.** B1 deveria ser ~0% em relação a B0 e mediu +3,3% de throughput; isso situa a variação entre configurações em torno de **±5%**. Todo número abaixo é lido contra esse piso.
+
+**B2 — o custo real do `INSERT` de enfileiramento.** p95 sequencial **+10,7%**, que em absoluto são **+73 µs** sobre uma operação de 0,689 ms; p50 **+28 µs**. Throughput −5,7%, na borda do piso de ruído. Sob concorrência de 8 conexões na mesma organização — o cenário realista — a diferença é **+0,1%**, indistinguível: ali o lock em `audit.chain_heads` domina (13,8 ms p95, ~18× maior que a operação inteira sequencial) e o INSERT extra desaparece dentro dele.
+
+**Veredito sobre B2:** custo real, pequeno, sub-100 µs, e pago **apenas** por organizações que ativaram um webhook. Não é regressão material. Nenhuma mudança de desenho.
+
+**B3 — a asserção que bloquearia a fase.** B3 não é pior que B2 em nenhuma métrica: p95 sequencial **−0,9%**, p50 **−2,8%**, p95 concorrente **−4,9%**, throughput **+1,7%**. O custo do enfileiramento **não cresce com o backlog**.
+
+**Limitação declarada do B3.** O rótulo diz "10k row backlog", mas o backlog real foi de **~3.960 linhas**, não 10.000: o script semeia o backlog a partir dos eventos de auditoria que aquele tenant já acumulou (`limit 10000`), e ao chegar em B3 existiam apenas ~3.960. A conclusão está sustentada nessa escala; **não** está sustentada em 100k. Como o enfileiramento é um `INSERT` numa tabela com índice único sobre `audit_event_id`, a degradação esperada seria logarítmica, mas isso é raciocínio, não medição. Correção para uma próxima execução: semear o backlog sinteticamente em vez de derivá-lo do histórico do tenant.
+
+**Contenção de lock.** Amostras de espera em lock: 39 / 37 / 42 / 51 (B0…B3). Números pequenos e ruidosos; a leve alta em B3 não é distinguível de variação amostral. A janela do lock em `chain_heads` é o fator dominante em todas as quatro configurações, com ou sem trigger.
+
+**Nenhum limiar foi aplicado.** Os números acima são o entregável; o baseline foi medido primeiro, com o trigger removido, e cada configuração é relatada contra ele.
