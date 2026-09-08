@@ -343,7 +343,7 @@ select is((select val from probe where label = 'attempt_mutable'), '42501',
 --    oldest_pending_seconds growing, which would have armed the runner lateness alarm
 --    permanently on a queue that was idle. Found by an end-to-end run, not by reading.
 -- ---------------------------------------------------------------------------------------
-do 1913
+do $$
 declare v_id uuid := (select val::uuid from probe where label = 'claim_delivery');
 begin
   update hooks.deliveries set state = 'PENDING', settled_at = null, attempts = 1 where id = v_id;
@@ -351,19 +351,19 @@ begin
          disabled_reason = null where id = 'e0000000-0000-4000-8000-00000000000a';
   insert into probe values ('health_pending_before',
     ((ops_rpc.webhook_health())->>'pending'));
-end 1913;
+end $$;
 
 select is((select val from probe where label = 'health_pending_before'), '1',
   'a PENDING delivery on an ACTIVE endpoint counts as backlog');
 
-do 1913
+do $$
 declare v_id uuid := (select val::uuid from probe where label = 'claim_delivery');
 begin
   update hooks.endpoints set status = 'REVOKED' where id = 'e0000000-0000-4000-8000-00000000000a';
   insert into probe values ('health_pending_after', ((ops_rpc.webhook_health())->>'pending'));
   insert into probe values ('health_orphaned', ((ops_rpc.webhook_health())->>'orphaned'));
   insert into probe values ('health_oldest', ((ops_rpc.webhook_health())->>'oldest_pending_seconds'));
-end 1913;
+end $$;
 
 select is((select val from probe where label = 'health_pending_after'), '0',
   'work parked behind a non-ACTIVE endpoint is NOT counted as backlog');
