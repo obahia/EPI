@@ -29,6 +29,12 @@ export function describeRpcError(error: PostgrestError, fallback: string): strin
       if (error.message?.includes("variant_label_already_exists")) {
         return "Já existe uma variante com este rótulo para este EPI.";
       }
+      if (error.message?.includes("already_member")) {
+        return "Esta pessoa já faz parte da equipe neste escopo.";
+      }
+      if (error.message?.includes("invitation_already_open")) {
+        return "Já existe um convite aberto para este e-mail neste escopo.";
+      }
       return "Já existe um registro com esses dados.";
     case "23514": // check_violation (delivery_has_no_items, too_many_items via a CHECK, delivery_not_draft, delivery_not_cancellable, etc.)
       if (error.message?.includes("delivery_has_no_items")) {
@@ -61,6 +67,18 @@ export function describeRpcError(error: PostgrestError, fallback: string): strin
       if (error.message?.includes("quantity_must_be_positive") || error.message?.includes("quantity_cannot_be_zero")) {
         return "Informe uma quantidade válida.";
       }
+      if (error.message?.includes("last_org_admin")) {
+        return "Esta é a última pessoa com acesso total à organização. Promova outra antes de remover ou rebaixar esta.";
+      }
+      if (error.message?.includes("invitation_already_accepted")) {
+        return "Este convite já foi aceito e não pode mais ser cancelado.";
+      }
+      if (error.message?.includes("invalid_email")) {
+        return "Informe um e-mail válido.";
+      }
+      if (error.message?.includes("invalid_ttl")) {
+        return "Prazo de validade inválido para o convite.";
+      }
       return fallback;
     case "22023": // invalid_text_representation / raised domain-validation errors
       if (error.message?.includes("invalid_movement_type_for_manual_entry")) {
@@ -75,7 +93,18 @@ export function describeRpcError(error: PostgrestError, fallback: string): strin
         return "Máximo de 200 itens por entrega.";
       }
       return "Lote grande demais (máximo de 20.000 linhas por envio).";
+    case "22P02": // invalid_text_representation -- a role string that is not an app.role
+      if (error.message?.includes("unknown_role")) {
+        return "Perfil de acesso inválido.";
+      }
+      return fallback;
     case "P0002": // not_found
+      // Deliberately one message for unknown, expired, revoked, already-accepted and
+      // wrong-recipient: api.accept_invitation raises the same signal for all five, and
+      // distinguishing them here would undo that on the way out.
+      if (error.message?.includes("invitation_not_available")) {
+        return "Este convite não está mais disponível. Peça um novo para quem administra a organização.";
+      }
       return "Registro não encontrado.";
     case "28000": // not_authenticated
       return "Sua sessão expirou. Entre novamente.";

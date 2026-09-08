@@ -2366,3 +2366,88 @@ export const getWebhookDeliveries = cache(
     }));
   },
 );
+
+// ---------------------------------------------------------------------------------------
+// Phase G -- team membership.
+// ---------------------------------------------------------------------------------------
+
+export type OrgMember = {
+  membershipId: string;
+  userId: string;
+  fullName: string;
+  email: string;
+  role: Membership["role"];
+  companyId: string | null;
+  companyName: string | null;
+  acceptedAt: string | null;
+  createdAt: string;
+  isLastOrgAdmin: boolean;
+};
+
+/** The organization's live memberships. `isLastOrgAdmin` is computed in Postgres by
+ * authz.is_last_org_admin -- the same function api.revoke_membership consults -- so the UI
+ * disables exactly the action the database would refuse, rather than a second guess at the
+ * rule that could drift from it. */
+export const getOrgMembers = cache(async (organizationId: string): Promise<OrgMember[]> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .rpc("list_members", { p_organization_id: organizationId });
+
+  if (error || !data) return [];
+  return (data as Record<string, never>[]).map((row) => ({
+    membershipId: row["membership_id"] as unknown as string,
+    userId: row["user_id"] as unknown as string,
+    fullName: row["full_name"] as unknown as string,
+    email: row["email"] as unknown as string,
+    role: row["role"] as unknown as Membership["role"],
+    companyId: row["company_id"] as unknown as string | null,
+    companyName: row["company_name"] as unknown as string | null,
+    acceptedAt: row["accepted_at"] as unknown as string | null,
+    createdAt: row["created_at"] as unknown as string,
+    isLastOrgAdmin: (row["is_last_org_admin"] as unknown as boolean) ?? false,
+  }));
+});
+
+export type InvitationStatus = "OPEN" | "ACCEPTED" | "REVOKED" | "EXPIRED";
+
+export type OrgInvitation = {
+  invitationId: string;
+  email: string;
+  role: Membership["role"];
+  companyId: string | null;
+  companyName: string | null;
+  invitedByName: string;
+  createdAt: string;
+  expiresAt: string;
+  status: InvitationStatus;
+};
+
+/** Never returns token_hash: api.list_invitations does not include it in its RETURNS list,
+ * because a token that can be read back from a listing is a token anyone with panel access
+ * can redeem as someone else. */
+export const getOrgInvitations = cache(async (organizationId: string): Promise<OrgInvitation[]> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .rpc("list_invitations", { p_organization_id: organizationId });
+
+  if (error || !data) return [];
+  return (data as Record<string, never>[]).map((row) => ({
+    invitationId: row["invitation_id"] as unknown as string,
+    email: row["email"] as unknown as string,
+    role: row["role"] as unknown as Membership["role"],
+    companyId: row["company_id"] as unknown as string | null,
+    companyName: row["company_name"] as unknown as string | null,
+    invitedByName: row["invited_by_name"] as unknown as string,
+    createdAt: row["created_at"] as unknown as string,
+    expiresAt: row["expires_at"] as unknown as string,
+    status: row["status"] as unknown as InvitationStatus,
+  }));
+});

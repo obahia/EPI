@@ -31,7 +31,7 @@ export type Mode = "signin" | "signup";
  * "Começar grátis" buttons deep-link here so they actually open the sign-up
  * form instead of silently landing on sign-in.
  */
-export function LoginView({ initialMode }: { initialMode: Mode }) {
+export function LoginView({ initialMode, next = null }: { initialMode: Mode; next?: string | null }) {
   const t = useT();
   const [mode, setMode] = useState<Mode>(initialMode);
 
@@ -58,7 +58,7 @@ export function LoginView({ initialMode }: { initialMode: Mode }) {
             </>
           )}
 
-          <LoginForm key={mode} mode={mode} />
+          <LoginForm key={mode} mode={mode} next={next} />
 
           <p className="mt-4 text-sm text-muted-foreground">
             {mode === "signin" ? (
@@ -112,7 +112,7 @@ export function LoginView({ initialMode }: { initialMode: Mode }) {
   );
 }
 
-function LoginForm({ mode }: { mode: Mode }) {
+function LoginForm({ mode, next }: { mode: Mode; next: string | null }) {
   const t = useT();
   const [state, formAction, pending] = useActionState(mode === "signin" ? signIn : signUp, initialState);
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
@@ -123,6 +123,7 @@ function LoginForm({ mode }: { mode: Mode }) {
 
   return (
     <form action={formAction} className="mt-8 flex flex-col gap-4">
+      {next ? <input type="hidden" name="next" value={next} /> : null}
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="email">{t.auth.emailLabel}</Label>
         <Input id="email" name="email" type="email" autoComplete="email" className={FIELD_CLASS} required />

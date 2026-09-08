@@ -88,6 +88,8 @@ Papéis de `membership` (4, não 5 — "Employee" não é um papel de usuário, 
 
 Permissões são uma matriz estática `authz.role_permissions(role, permission)`, semeada por migration. Escalada de privilégio exigiria uma migration, não um `UPDATE` em runtime.
 
+**`membership.manage` é o caso em que a matriz estática, sozinha, não bastava.** Ela é concedida a `COMPANY_ADMIN` *e* a `ORG_ADMIN` (`20260831140300:80,90`), e uma permissão não diz **que papel** o portador pode conceder. Sem uma segunda regra, um `COMPANY_ADMIN` poderia convidar alguém como `ORG_ADMIN` — escalada trivial, silenciosa, e indistinguível de uma funcionalidade. `auth_ctx.can_grant_role(org, company, role)` (Fase G) é essa regra: um `ORG_ADMIN` de escopo organizacional concede qualquer papel em qualquer escopo; um `COMPANY_ADMIN` concede **estritamente abaixo de si** e **somente dentro de uma empresa que já cobre** — nunca com `company_id IS NULL`, porque escopo organizacional cobre toda empresa presente e futura. A ordenação vem do próprio enum `app.role` (Postgres ordena enums pela declaração), então "abaixo de mim" é `p_role < 'COMPANY_ADMIN'`, não uma tabela paralela que poderia divergir do enum.
+
 **Revelar o CPF completo** é uma permissão própria (`employee.cpf.reveal`), **fora** do papel padrão de `PARTNER_ADMIN`/`ORG_ADMIN` — reflete a distinção controlador/operador da LGPD (a clínica tipicamente é operadora do dado do funcionário; a empresa-cliente é controladora) e cada revelação grava um evento de auditoria nomeando o usuário.
 
 ## 6. Modelo de dados
@@ -675,3 +677,39 @@ Durante indisponibilidade do runner, o outbox acumula de forma durável e drena 
 O roadmap de expansão descreve a Fase F como *"position CSV import, `/api/v1/*`, API keys, webhooks"*, enquanto a §18 da especificação original descreve importação de **colaboradores** — que já existia desde a FASE 1. As duas leituras não coincidem.
 
 **Resolução adotada (decisão do usuário, 2026-09-07):** a Fase F completa o import de colaboradores (resolvendo Cargo → `position_id` e Unidade → `location_id`, e adicionando XLSX). Import de cargos e da matriz cargo×EPI **não** entra automaticamente. A divergência fica registrada aqui em vez de silenciosamente resolvida a favor de uma das leituras.
+
+---
+
+## 26. Membros e convites (Fase G)
+
+Até a Fase G existia **um único** `insert into authz.memberships` em todo o código, dentro de `api.onboard_organization`, tornando quem se cadastra o `ORG_ADMIN` da própria organização. Não havia convite, não havia como adicionar uma segunda pessoa, não havia como escopar alguém a uma empresa e não havia como revogar ninguém. `membership.manage` era uma permissão semeada desde a FASE 0 sem operação atrás dela.
+
+Isso pesava mais exatamente sobre o cliente para o qual a tenancy foi desenhada: uma organização `PARTNER` — uma clínica de SST com N empresas-clientes — não podia ter um segundo funcionário. O modelo suporta isso perfeitamente (`company_id IS NULL` cobre toda a organização com uma linha; `company_id` preenchido escopa a uma empresa) e a RLS inteira é construída em cima dele. Nada conseguia escrever aquelas linhas.
+
+### O convite
+
+`authz.membership_invitations` guarda **apenas o hash** do token. O token é gerado no Node, com 32 bytes de CSPRNG, e só o SHA-256 chega ao Postgres — a mesma disciplina do token do trabalhador e do segredo da API key. **Sem pepper**, e a diferença é deliberada: um pepper protege contra quem tem um dump *e consegue adivinhar a entrada*, que é o caso do CPF (onze dígitos, enumerável). Um token de 256 bits não é reversível a partir de um dump por meio nenhum, e o pepper só acrescentaria um sétimo segredo a manter idêntico entre ambientes — uma classe de falha de deployment que este projeto já pagou mais de uma vez.
+
+**O endereço é fixado no convite e verificado na aceitação.** Sem isso, quem tivesse o link tomaria a vaga: o link seria a credencial, e não a prova de que uma pessoa específica foi convidada.
+
+**Uma única resposta indistinguível** — `invitation_not_available` — para token desconhecido, expirado, revogado, já aceito e destinatário errado. Um erro que diferencia "já usado" de "nunca existiu" confirma a um estranho que o link era real.
+
+**Aceitar é POST, nunca o carregamento da página.** Um convite é de uso único; consumi-lo no GET significaria que um preview de link, um scanner de e-mail, um reescritor corporativo de URL ou um prefetch do navegador poderia queimá-lo antes do clique — e a falha seria indistinguível de um ataque, porque a segunda tentativa recebe a mesma resposta opaca.
+
+**A página do convite não lê nada sobre o convite** — nem a organização, nem o papel, nem quem enviou. Ela não pode: `authz.membership_invitations` não é concedida a papel nenhum, e a única função que a lê é `api.accept_invitation`. Isso é a forma certa, não uma limitação a contornar: uma página que descrevesse o convite antes da aceitação confirmaria, a quem tivesse um link vazado, que ele é real e qual tenant abre.
+
+### O bloqueio de autoexclusão
+
+`authz.is_last_org_admin` é consultada tanto pela revogação quanto pela troca de papel. Toda organização tem exatamente **uma** pessoa no dia em que é criada, então sem essa regra a primeira ação possível de um cliente seria o autobloqueio permanente — e não há caminho de recuperação no produto: as tabelas de *break-glass* da FASE 0 (`app.platform_admins`, `app.platform_access_grants`) continuam sem código, deliberadamente fora desta fase.
+
+Trocar o papel de alguém é verificado contra **os dois** papéis, o novo e o antigo. Só o novo não bastaria: um `COMPANY_ADMIN` poderia rebaixar o `ORG_ADMIN` acima dele para `VIEWER`, que é um papel que ele tem direito de conceder.
+
+### Revogar, nunca apagar
+
+`revoked_at` é preenchido e a linha sai dos índices únicos parciais (todos `where revoked_at is null`), então a mesma pessoa pode ser reconvidada ao mesmo escopo depois, e o histórico de quem teve acesso e quando permanece.
+
+### O que esta fase não faz
+
+**Nenhum acesso entre organizações.** A §3 chama o modelo de dois níveis e um dono de não negociável e rejeita predicados de ancestralidade na RLS como "historicamente a causa mais comum de vazamento entre tenants". Nada aqui adiciona um predicado que cruze organização. `partner_relationships` do roadmap de expansão continua não construída; convidar, escopar e revogar é necessário existindo ela ou não.
+
+**Nenhum envio de e-mail.** O projeto não tem provedor transacional configurado (ver a nota da FASE 0 em `(auth)/login/actions.ts`), então o link é devolvido a quem convidou, exibido uma única vez, para ser repassado por um canal em que as duas pessoas já confiam. É uma limitação declarada, não um toast de "convite enviado" que mentiria para quem esperaria um e-mail que nunca chega.

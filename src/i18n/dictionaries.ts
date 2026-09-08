@@ -51,6 +51,7 @@ const pt = {
     positions: "Cargos",
     locations: "Locais",
     stock: "Estoque",
+    team: "Equipe",
   },
   languageSwitcher: {
     label: "Idioma",
@@ -551,6 +552,10 @@ const pt = {
     integrationsCardDescription:
       "Chaves de API e webhooks. Uma chave de API não é um usuário e nunca alcança a confirmação do trabalhador nem o comprovante selado.",
     integrationsCardLink: "Gerenciar integrações",
+    teamCardTitle: "Equipe",
+    teamCardDescription:
+      "Quem administra o Selo nesta organização. O acesso vem sempre de um convite aceito pela própria pessoa.",
+    teamCardLink: "Gerenciar equipe",
     earlyReplacementPolicyLabel: "Troca antecipada de EPI",
     earlyReplacementPolicyAllow: "Permitir sem aviso",
     earlyReplacementPolicyWarn: "Avisar e exigir confirmação",
@@ -863,6 +868,7 @@ const en: typeof pt = {
     positions: "Positions",
     locations: "Locations",
     stock: "Stock",
+    team: "Members",
   },
   languageSwitcher: {
     label: "Language",
@@ -1362,6 +1368,10 @@ const en: typeof pt = {
     integrationsCardDescription:
       "API keys and webhooks. An API key is not a user, and never reaches worker confirmation or the sealed receipt.",
     integrationsCardLink: "Manage integrations",
+    teamCardTitle: "Members",
+    teamCardDescription:
+      "Who administers Selo in this organization. Access always comes from an invitation the person accepts themselves.",
+    teamCardLink: "Manage members",
     earlyReplacementPolicyLabel: "Early PPE replacement",
     earlyReplacementPolicyAllow: "Allow without a warning",
     earlyReplacementPolicyWarn: "Warn and require confirmation",

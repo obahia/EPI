@@ -10,6 +10,11 @@
 //      successor, the chain must be consistent, and the loser must get a stable domain
 //      error (never the state-machine trigger's raw "row is frozen" message, per the
 //      FOR UPDATE fix in 20260903130000_stock_location_transfer_gate_fixes.sql).
+//   3. Two api.accept_invitation calls racing on the SAME invitation token (Phase G) --
+//      an invitation is single use, and the whole point of hashing the token is undone if
+//      two in-flight redemptions can both create a membership. The partial unique index on
+//      authz.memberships is what settles it, and this proves the loser gets a stable domain
+//      error rather than a raw constraint name.
 //
 // This needs a REAL Postgres with two independent client connections -- PGlite (used
 // elsewhere in this repo for fast local checks) is a single in-process WASM instance and
@@ -79,6 +84,9 @@ async function main() {
 
   console.log('\n=== SCENARIO 2: concurrent replacement race ===\n');
   await scenarioReplacementRace(setup, adminId, companyId);
+
+  console.log('\n=== SCENARIO 3: concurrent invitation acceptance ===\n');
+  await scenarioInvitationRace(setup, adminId, orgId);
 
   await setup.end();
   console.log(`\n=== CONCURRENCY TEST: ${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'} ===`);
@@ -294,6 +302,111 @@ async function scenarioReplacementRace(setup, adminId, companyId) {
     'the successor shares the same chain_id and has chain_version = original + 1',
     chainCheck.rows[0]?.same_chain === true && chainCheck.rows[0]?.version_incremented === true,
     JSON.stringify(chainCheck.rows[0]),
+  );
+}
+
+async function scenarioInvitationRace(setup, adminId, orgId) {
+  // The invited person already has an account -- the ordinary case, and the only one where a
+  // double redemption is even reachable (the token is pinned to their address, and
+  // app.users.email is unique, so no second identity can be racing for the same seat).
+  const inviteeId = crypto.randomUUID();
+  const inviteeEmail = `invitee-${inviteeId}@selo-test.dev`;
+  await setup.query(
+    `insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, confirmation_token, recovery_token, email_change_token_new, email_change, is_sso_user, is_anonymous)
+     values ('00000000-0000-0000-0000-000000000000', $1, 'authenticated', 'authenticated', $2, extensions.crypt('x', extensions.gen_salt('bf')), now(), '{}', '{"full_name":"Concurrency Test Invitee"}', now(), now(), '', '', '', '', false, false)`,
+    [inviteeId, inviteeEmail],
+  );
+
+  // Generated and hashed exactly the way the Server Action does it (see
+  // src/lib/crypto/invitation-token.ts): only the hash is ever sent to Postgres.
+  const token = crypto.randomBytes(32).toString('base64url');
+  const tokenHashB64 = crypto.createHash('sha256').update(token, 'utf8').digest('base64');
+
+  const invite = await asUser(
+    setup,
+    adminId,
+    `select api.invite_member($1, null, $2, 'SST_OPERATOR', $3, 168) as id`,
+    [orgId, inviteeEmail, tokenHashB64],
+  );
+  const invitationId = invite.rows[0].id;
+
+  // The actual race: two REAL, independent connections redeeming the same link at once --
+  // a double-clicked button, or the same message opened on a phone and a laptop.
+  const clientA = await newClient();
+  const clientB = await newClient();
+
+  const results = await Promise.allSettled([
+    asUser(clientA, inviteeId, `select * from api.accept_invitation($1)`, [tokenHashB64]),
+    asUser(clientB, inviteeId, `select * from api.accept_invitation($1)`, [tokenHashB64]),
+  ]);
+
+  await clientA.end();
+  await clientB.end();
+
+  const succeeded = results.filter((r) => r.status === 'fulfilled');
+  const failed = results.filter((r) => r.status === 'rejected');
+
+  check(
+    'exactly one accept_invitation call succeeded',
+    succeeded.length === 1,
+    `succeeded=${succeeded.length} failed=${failed.length}`,
+  );
+  check(
+    'the losing call failed with a stable domain error, never a raw constraint name',
+    failed.length === 1 &&
+      ['23505', 'P0002'].includes(String(failed[0].reason?.code)) &&
+      /already_member|invitation_not_available/.test(String(failed[0].reason?.message)),
+    failed[0] ? `code=${failed[0].reason?.code} message=${failed[0].reason?.message}` : 'n/a',
+  );
+
+  const memberships = await setup.query(
+    `select count(*)::int as n from authz.memberships where user_id = $1 and revoked_at is null`,
+    [inviteeId],
+  );
+  check(
+    'exactly one membership exists -- the seat was granted once, not twice',
+    memberships.rows[0].n === 1,
+    `got=${memberships.rows[0].n}`,
+  );
+
+  const invitation = await setup.query(
+    `select accepted_at is not null as accepted, accepted_user_id from authz.membership_invitations where id = $1`,
+    [invitationId],
+  );
+  check('the invitation is marked accepted', invitation.rows[0]?.accepted === true);
+  check(
+    'and attributed to the person who actually redeemed it',
+    invitation.rows[0]?.accepted_user_id === inviteeId,
+    `got=${invitation.rows[0]?.accepted_user_id}`,
+  );
+
+  const events = await setup.query(
+    `select count(*)::int as n from audit.audit_events
+      where entity_table = 'membership_invitations' and entity_id = $1 and event_type = 'INVITATION_ACCEPTED'`,
+    [invitationId],
+  );
+  check(
+    'exactly one INVITATION_ACCEPTED event was written -- the losing transaction left nothing behind',
+    events.rows[0].n === 1,
+    `got=${events.rows[0].n}`,
+  );
+
+  // Replaying the token AFTER the race, from a fresh connection, is the same refusal a
+  // stranger would get: the acceptance is not idempotent, it is spent.
+  const replayClient = await newClient();
+  let replayCode = null;
+  let replayMessage = null;
+  try {
+    await asUser(replayClient, inviteeId, `select * from api.accept_invitation($1)`, [tokenHashB64]);
+  } catch (err) {
+    replayCode = err.code;
+    replayMessage = err.message;
+  }
+  await replayClient.end();
+  check(
+    'replaying the spent token is refused',
+    replayCode !== null,
+    `code=${replayCode} message=${replayMessage}`,
   );
 }
 

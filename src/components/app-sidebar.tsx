@@ -14,6 +14,7 @@ import {
   Package,
   ShieldCheck,
   Truck,
+  UserCog,
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -59,6 +60,18 @@ const LINKS = [
   { href: "/companies", key: "companies" as const, icon: Building2 },
 ];
 
+/**
+ * Shown only to the two roles that hold `membership.manage` (20260831140300:80,90). Kept out
+ * of LINKS because that array is unconditional: this is the first nav row in the app whose
+ * visibility depends on the viewer, and `identity.role` -- already passed in for the footer --
+ * is enough to decide it without making this client component server-aware.
+ *
+ * It is a link, not a gate: /settings/team re-checks the memberships server-side, and every
+ * action behind it is authorized again in Postgres.
+ */
+const ADMIN_LINK = { href: "/settings/team", key: "team" as const, icon: UserCog };
+const ADMIN_ROLES = ["ORG_ADMIN", "COMPANY_ADMIN"];
+
 /** The mockup's rail sets its labels in regular weight and only the active row goes bold.
  * Figtree is a geometric sans -- carrying it at extrabold across all six rows is what made
  * the column read as a fast-food logotype rather than as navigation. */
@@ -91,7 +104,7 @@ export function activeNavHref(pathname: string): string | null {
   if (/^\/companies\/[^/]+\/dashboard(\/|$)/.test(pathname)) return "/dashboard";
 
   let best: string | null = null;
-  for (const { href } of LINKS) {
+  for (const { href } of [...LINKS, ADMIN_LINK]) {
     if (pathname === href || pathname.startsWith(`${href}/`)) {
       if (best === null || href.length > best.length) best = href;
     }
@@ -125,7 +138,7 @@ function SidebarBody({ identity, onNavigate }: { identity: SidebarIdentity | nul
       ) : null}
 
       <nav className="mt-6 flex flex-1 flex-col gap-0.5">
-        {LINKS.map(({ href, key, icon: Icon }) => {
+        {[...LINKS, ...(identity && ADMIN_ROLES.includes(identity.role) ? [ADMIN_LINK] : [])].map(({ href, key, icon: Icon }) => {
           const active = activeNavHref(pathname) === href;
           return (
             <Link

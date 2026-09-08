@@ -265,3 +265,47 @@ Executado em `.github/workflows/ci.yml`, job `database`, com `BENCH_REPEATS=3`, 
 **Contenção de lock.** Amostras de espera em lock: 39 / 37 / 42 / 51 (B0…B3). Números pequenos e ruidosos; a leve alta em B3 não é distinguível de variação amostral. A janela do lock em `chain_heads` é o fator dominante em todas as quatro configurações, com ou sem trigger.
 
 **Nenhum limiar foi aplicado.** Os números acima são o entregável; o baseline foi medido primeiro, com o trigger removido, e cada configuração é relatada contra ele.
+
+---
+
+## FASE G — Membros e convites (2026-09-08)
+
+Escopo: a fundação de parceria/membership. O que foi construído é a gestão de equipe que faltava desde a FASE 0 — convidar, escopar, trocar papel, revogar — e **não** acesso entre organizações.
+
+### Por que não travou numa pergunta
+
+A leitura de `partner_relationships` no roadmap de expansão é ambígua: pode significar "permissões delegadas separadas da posse" (algo novo) ou "a organização PARTNER com N empresas-clientes" (que já existe e é testada desde a FASE 0). Levantei isso como bloqueio e estava errado: **o trabalho é o mesmo sob as duas leituras.** Acesso entre orgs seria uma adição por cima, não uma alternativa. A pergunta ficou registrada em `docs/architecture.md` §26; a fase seguiu.
+
+### O que foi construído
+
+**`auth_ctx.can_grant_role`** — a regra que faltava atrás de `membership.manage`, que `COMPANY_ADMIN` e `ORG_ADMIN` compartilham. Os cinco helpers `auth_ctx.*` anteriores continuam byte a byte iguais; este é aditivo.
+
+**`authz.membership_invitations`** — só o hash do token, endereço fixado, TTL com teto de 30 dias, e três estados terminais mutuamente exclusivos por CHECK (aberto / aceito / revogado).
+
+**`api.invite_member`, `api.accept_invitation`, `api.revoke_invitation`, `api.list_members`, `api.list_invitations`, `api.update_membership_role`, `api.revoke_membership`** — e `authz.is_last_org_admin`, consultada pela revogação e pelo rebaixamento.
+
+**Painel** — `/settings/team` (equipe + convites), `/convite/<token>` (aceitação, fora do dashboard), e a primeira linha de navegação do app cuja visibilidade depende do papel de quem olha.
+
+**Eventos** — `MEMBER_INVITED`, `INVITATION_ACCEPTED`, `INVITATION_REVOKED`, `MEMBER_ROLE_CHANGED`, `MEMBER_REVOKED`, todos na cadeia de auditoria do próprio tenant. O endereço convidado **não** é gravado: é dado pessoal, e a trilha responde "quem concedeu qual escopo", o que os ids já fazem.
+
+### Decisões que valem registrar
+
+**Token sem pepper, ao contrário do token do trabalhador e da API key.** Justificativa completa em `src/lib/crypto/invitation-token.ts` e em `docs/architecture.md` §26. Resumo: pepper protege contra entrada adivinhável; 256 bits de CSPRNG não são adivinháveis, e um sétimo segredo para manter sincronizado entre ambientes é uma classe de falha que este projeto já pagou.
+
+**Aceitação por POST, não por GET.** Um convite é de uso único; um prefetch ou scanner de link o queimaria antes do clique.
+
+**Redirect pós-login restrito a um único formato.** `/login?next=…` aceita **apenas** `^/convite/[A-Za-z0-9_-]{43}$`, casado literalmente. "Começa com barra" é como uma página de login vira ponte de phishing.
+
+### Estado de verificação
+
+| Camada | Estado |
+|---|---|
+| `npm run typecheck` / `lint` / `test` (218 testes, 9 novos em `invitation-token.test.ts`) | verde local |
+| `npm run build` | verde local, `/convite/[token]` e `/settings/team` presentes |
+| `npm run db:check:local` (PGlite) | as duas migrations aplicam de zero |
+| pgTAP `230_membership_invitations.sql` (22 asserções) | **escrita, ainda não executada** — exige Postgres real, roda só no CI |
+| `scripts/concurrency-test.mjs` cenário 3 (duas aceitações simultâneas do mesmo token) | **escrito, ainda não executado** — exige duas conexões reais, roda só no CI |
+| Migrations aplicadas em `epi-dev` | **não** |
+| E2E ao vivo (convidar, aceitar em outra sessão, revogar) | **não** |
+
+Nada acima é relatado como funcionando por parecer certo. As três últimas linhas mudam quando houver evidência, não antes.

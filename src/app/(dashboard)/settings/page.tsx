@@ -48,6 +48,22 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* Phase G. Also reachable from the sidebar, which shows the row to ORG_ADMIN and
+          COMPANY_ADMIN -- the two roles that hold membership.manage. This card is here as
+          well because /settings is where an ORG_ADMIN already comes to change what the
+          organization does. */}
+      <Card className="max-w-lg">
+        <CardHeader>
+          <CardTitle>{t.settings.teamCardTitle}</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col items-start gap-3">
+          <p className="text-[13px] text-muted-foreground">{t.settings.teamCardDescription}</p>
+          <Button asChild>
+            <Link href="/settings/team">{t.settings.teamCardLink}</Link>
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* Phase F. Reached from here rather than from the sidebar: the sidebar is a client
           component that only receives the plain identity prop, so it cannot see the
           org-wide ORG_ADMIN membership this section requires -- and /settings already

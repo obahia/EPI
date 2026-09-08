@@ -22,6 +22,19 @@ const signUpSchema = z
 export type AuthActionState = { error: string | null };
 
 /**
+ * The only destination a login is allowed to carry, matched literally rather than merely
+ * "starts with a slash": an open redirect on a sign-in page is exactly how a phishing flow
+ * borrows a real domain. Phase G needs one destination -- an invitation link that survives
+ * the sign-in or sign-up the invited person has to do first -- so one is what is allowed.
+ */
+const INVITATION_PATH = /^\/convite\/[A-Za-z0-9_-]{43}$/;
+
+function safeNext(formData: FormData): string {
+  const next = formData.get("next");
+  return typeof next === "string" && INVITATION_PATH.test(next) ? next : "/dashboard";
+}
+
+/**
  * Password auth, deliberately: this is FASE 0 and no email-sending provider is
  * configured on the Supabase project yet, so a magic-link/OTP flow would have nothing to
  * deliver through. Revisit once FASE 1+ wires up transactional email. See
@@ -41,7 +54,7 @@ export async function signIn(_prevState: AuthActionState, formData: FormData): P
     return { error: t.auth.signInError };
   }
 
-  redirect("/dashboard");
+  redirect(safeNext(formData));
 }
 
 /**
@@ -63,7 +76,7 @@ export async function signUp(_prevState: AuthActionState, formData: FormData): P
     return { error: t.auth.signUpError };
   }
 
-  redirect("/dashboard");
+  redirect(safeNext(formData));
 }
 
 export async function signOut() {
