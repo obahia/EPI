@@ -261,7 +261,7 @@ select ok(
 -- DAL swallowed the error into an empty array, so the screen rendered blank instead of
 -- failing. api.list_members and api.list_invitations are the same shape. They get called.
 -- ---------------------------------------------------------------------------------------
-do $
+do $$
 declare v_org uuid := (select id from fx where label = 'org'); n int; v_flag boolean; v_status text;
 begin
   set local role authenticated;
@@ -284,7 +284,7 @@ begin
 exception when others then
   insert into probe values ('reads_error', sqlstate || ' ' || sqlerrm);
   reset role;
-end $;
+end $$;
 
 select is((select val from probe where label = 'members_n'), '3',
   'api.list_members RUNS and returns the org''s three live memberships -- the org-wide admin, the company-scoped admin, and the operator who just accepted');

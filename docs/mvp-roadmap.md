@@ -303,7 +303,7 @@ A leitura de `partner_relationships` no roadmap de expansão é ambígua: pode s
 | `npm run typecheck` / `lint` / `test` (218 testes, 9 novos em `invitation-token.test.ts`) | verde local |
 | `npm run build` | verde local, `/convite/[token]` e `/settings/team` presentes |
 | `npm run db:check:local` (PGlite) | as duas migrations aplicam de zero |
-| pgTAP `230_membership_invitations.sql` (26 asserções) | **primeira execução no CI falhou no fixture, antes de qualquer asserção** — ver abaixo |
+| pgTAP `230_membership_invitations.sql` (26 asserções) | **duas execuções falhas, ambas por bug meu na suíte** — 16/16 das que chegaram a rodar passaram; ver abaixo |
 | `scripts/concurrency-test.mjs` cenário 3 (duas aceitações simultâneas do mesmo token) | **escrito, ainda não executado** — exige duas conexões reais, roda só no CI |
 | Migrations aplicadas em `epi-dev` | **sim** — confirmado pela primeira chamada bem-sucedida a `api.invite_member` sobre PostgREST, não por inspeção |
 | E2E ao vivo (`scripts/e2e-phase-g.mjs`, 19 verificações) | **19/19 PASS** contra o `epi-dev` real |
@@ -334,3 +334,15 @@ O que a execução provou, além do caminho feliz:
 - **Escalada recusada ao vivo:** um `SST_OPERATOR` chamando `api.invite_member` recebe `42501`; o último `ORG_ADMIN` tentando se revogar recebe `23514 last_org_admin`.
 
 **O que este E2E não cobre, declarado:** a UI. Ele exerce as RPCs sobre PostgREST, não as páginas `/settings/team` e `/convite/<token>`. E ele deixa no `epi-dev` uma membership revogada e um convite aceito — que é o estado final correto por desenho (revogar, nunca apagar), não sujeira.
+
+### FASE G — segunda falha do CI: o delimitador de dollar quote, terceira variante
+
+`ERROR: syntax error at or near "$"` na linha 264, `do $`. Postgres parou de parsear ali e as 10 asserções seguintes não rodaram. **As 16 que chegaram a rodar passaram** — a seção de escalada e a de aceitação estão verdes em Postgres real.
+
+**Causa:** `String.prototype.replace`. No texto de **substituição**, `$$` é o escape para um `$` literal. O script que inseriu a seção 2b usou `s.replace(anchor, block + anchor)`, então `do $$` foi escrito como `do $` e `end $$;` como `end $;`. Não foi o shell desta vez. Corrigido com `split/join`.
+
+**E por que o lint que existe para isso não pegou.** `scripts/check-pgtap-lint.mjs` reconhecia *assinaturas* das duas variantes já vistas: `do <número>` (shell expandindo `$$` no PID) e contagem **ímpar** de `$$`. A variante do `replace()` come um `$` de **ambos** os delimitadores do bloco, então a contagem continuou par e nada disparou.
+
+O check foi reescrito para parar de reconhecer assinaturas e passar a verificar a propriedade: **todo `$` num arquivo destes pertence a um delimitador bem formado** (`$$` ou `$tag$`). Tira os bem formados e o que sobrar é um delimitador que perdeu caractere — verdade num arquivo correto independentemente de como foi corrompido. Verificado nas duas direções: zero falsos positivos nas 23 suítes boas, e falha nas duas linhas certas quando o arquivo é corrompido do jeito que o `replace()` corrompeu.
+
+Terceira vez que esta classe de bug custa um round de CI, e a segunda em que o guarda escrito para ela olhava para a forma anterior em vez de para a propriedade.
