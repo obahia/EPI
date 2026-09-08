@@ -109,12 +109,46 @@ describe("isBlockedAddress", () => {
 });
 
 describe("createPinnedLookup", () => {
-  function run(addresses: { address: string; family: number }[]) {
+  function run(
+    addresses: { address: string; family: number }[],
+    options: Record<string, unknown> = {},
+  ) {
     const lookup = createPinnedLookup(async () => addresses);
     return new Promise<{ err: NodeJS.ErrnoException | null; address?: unknown }>((resolve) => {
-      lookup("host.example.com", {}, (err, address) => resolve({ err, address }));
+      lookup("host.example.com", options, (err, address) => resolve({ err, address }));
     });
   }
+
+  // Node calls this hook with { all: true } on some paths and then expects an ARRAY back.
+  // Returning a scalar there fails with "Invalid IP address: undefined" -- which broke EVERY
+  // webhook delivery at the connection layer, and only surfaced when a delivery was actually
+  // attempted against a real host.
+  it("returns an ARRAY when Node asks with all: true", async () => {
+    const { err, address } = await run(
+      [
+        { address: "93.184.216.34", family: 4 },
+        { address: "93.184.216.35", family: 4 },
+      ],
+      { all: true },
+    );
+    expect(err).toBeNull();
+    expect(Array.isArray(address)).toBe(true);
+    expect(address).toEqual([
+      { address: "93.184.216.34", family: 4 },
+      { address: "93.184.216.35", family: 4 },
+    ]);
+  });
+
+  it("still blocks a private address when all: true is requested", async () => {
+    const { err } = await run(
+      [
+        { address: "93.184.216.34", family: 4 },
+        { address: "10.0.0.1", family: 4 },
+      ],
+      { all: true },
+    );
+    expect(err?.code).toBe("EBLOCKED");
+  });
 
   it("returns the first address when every address is public", async () => {
     const { err, address } = await run([{ address: "93.184.216.34", family: 4 }]);

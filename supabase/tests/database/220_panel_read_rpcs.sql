@@ -11,7 +11,7 @@ create extension if not exists pgtap with schema extensions;
 
 begin;
 
-select plan(11);
+select plan(19);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -217,6 +217,56 @@ end $$;
 
 select is((select val from probe where label = 'bad_scope'), 'unknown_scope',
   'a scope outside the m2m.api_scope allowlist is refused when written, not when used');
+
+
+-- ---------------------------------------------------------------------------------------
+-- 5. The webhook URL policy must live in the DATABASE, not only in the Server Action.
+--    api.create_webhook_endpoint is granted to `authenticated`, so an ORG_ADMIN calling it
+--    straight through PostgREST skipped checkWebhookUrl entirely -- a real bypass found by
+--    an end-to-end run, which stored an IP literal, an internal host and a non-443 port.
+-- ---------------------------------------------------------------------------------------
+select ok(hooks.is_public_https_url('https://hooks.example.com/selo'),
+  'a normal public https URL is accepted');
+
+select ok(not hooks.is_public_https_url('http://hooks.example.com/selo'),
+  'http is refused -- a signed payload sent in cleartext is an unsigned payload with extra steps');
+
+select ok(not hooks.is_public_https_url('https://93.184.216.34/hook'),
+  'an IPv4 literal is refused');
+
+select ok(not hooks.is_public_https_url('https://[2606:2800:220:1:248:1893:25c8:1946]/hook'),
+  'an IPv6 literal is refused');
+
+select ok(not hooks.is_public_https_url('https://user:pw@hooks.example.com/hook'),
+  'credentials embedded in the URL are refused');
+
+select ok(not hooks.is_public_https_url('https://hooks.example.com:8443/hook'),
+  'a port other than 443 is refused');
+
+select ok(not hooks.is_public_https_url('https://api.internal/hook')
+      and not hooks.is_public_https_url('https://localhost/hook')
+      and not hooks.is_public_https_url('https://intranet/hook'),
+  'internal hostnames are refused');
+
+do $$
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claims', '{"sub":"d1000000-0000-4000-8000-00000000000d","role":"authenticated"}', true);
+  begin
+    -- Straight at the RPC, exactly as the bypass did.
+    perform api.create_webhook_endpoint(
+      (select id from fx where label = 'org'), 'https://93.184.216.34/hook',
+      encode(repeat('w',40)::bytea,'base64'), '{}', null, false);
+    insert into probe values ('rpc_ip_literal', 'ACEITOU');
+  exception when others then
+    insert into probe values ('rpc_ip_literal', sqlerrm);
+  end;
+  reset role;
+end $$;
+
+select is((select val from probe where label = 'rpc_ip_literal'), 'invalid_webhook_url',
+  'api.create_webhook_endpoint itself refuses an IP literal -- the policy is no longer only in TypeScript');
+
 
 select * from finish();
 

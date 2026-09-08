@@ -183,6 +183,14 @@ export function createPinnedLookup(
   resolver: (hostname: string) => Promise<{ address: string; family: number }[]>,
 ) {
   return function pinnedLookup(hostname: string, options: unknown, callback: LookupCallback): void {
+    // Node calls this hook with `{ all: true }` on some paths and then expects an ARRAY
+    // back; returning a scalar there makes it read `.address` of a non-array and fail with
+    // "Invalid IP address: undefined". That is not an edge case -- it made EVERY webhook
+    // delivery fail at the connection layer, which only showed up once a real delivery was
+    // attempted against a real host. Honour whatever shape Node asked for.
+    const wantsAll =
+      typeof options === "object" && options !== null && (options as { all?: boolean }).all === true;
+
     resolver(hostname)
       .then((addresses) => {
         if (addresses.length === 0) {
@@ -197,6 +205,13 @@ export function createPinnedLookup(
             return;
           }
         }
+        // Every address was validated above, so handing back the whole set is safe -- Node
+        // may try them in order and each one is already known to be public unicast.
+        if (wantsAll) {
+          callback(null, addresses);
+          return;
+        }
+
         const chosen = addresses[0];
         if (chosen === undefined) {
           callback(Object.assign(new Error(`no address for ${hostname}`), { code: "ENOTFOUND" }));
