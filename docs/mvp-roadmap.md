@@ -305,8 +305,8 @@ A leitura de `partner_relationships` no roadmap de expansão é ambígua: pode s
 | `npm run db:check:local` (PGlite) | as duas migrations aplicam de zero |
 | pgTAP `230_membership_invitations.sql` (26 asserções) | **primeira execução no CI falhou no fixture, antes de qualquer asserção** — ver abaixo |
 | `scripts/concurrency-test.mjs` cenário 3 (duas aceitações simultâneas do mesmo token) | **escrito, ainda não executado** — exige duas conexões reais, roda só no CI |
-| Migrations aplicadas em `epi-dev` | **não** |
-| E2E ao vivo (convidar, aceitar em outra sessão, revogar) | **não** |
+| Migrations aplicadas em `epi-dev` | **sim** — confirmado pela primeira chamada bem-sucedida a `api.invite_member` sobre PostgREST, não por inspeção |
+| E2E ao vivo (`scripts/e2e-phase-g.mjs`, 19 verificações) | **19/19 PASS** contra o `epi-dev` real |
 
 Nada acima é relatado como funcionando por parecer certo. As três últimas linhas mudam quando houver evidência, não antes.
 
@@ -317,3 +317,20 @@ Nada acima é relatado como funcionando por parecer certo. As três últimas lin
 A restrição está certa e não foi tocada. Uma organização PARTNER é criada pelos operadores do próprio Selo hoje, não em self-service, então nenhuma RPC cunha uma — é justamente por isso que o fixture precisa inseri-la direto, do mesmo jeito que a `010_tenant_isolation.sql` monta seus dois tenants sob privilégio total antes de trocar de papel.
 
 **E o que a falha expôs de mais grave:** a suíte tinha o mesmo buraco que custou caro na Fase F. `api.list_members` e `api.list_invitations` são `RETURNS TABLE`, a forma exata que já quebrou quatro vezes neste código por `42702` em tempo de execução, e a suíte só checava a lista de retorno delas — **nunca as chamava**. Foi assim que `api.list_api_keys`, `api.list_webhook_deliveries` e `api.import_run_status` passaram por um CI verde estando quebradas em *toda* chamada. As duas agora são chamadas de verdade (seção 2b), o que levou a suíte de 22 para 26 asserções.
+
+### FASE G — E2E ao vivo (`scripts/e2e-phase-g.mjs`, 19/19 PASS)
+
+Rodado contra o projeto `epi-dev` real, com **duas identidades diferentes**, cada uma no seu próprio cliente com a sua própria sessão. A chave secreta é usada só para `auth.admin.createUser` (o signup público é limitado por rate); toda RPC abaixo foi chamada com JWT de usuário real, como `authenticated` — que é o único jeito de exercer a autorização de que esta fase trata.
+
+Esta é a camada que o CI **não alcança por construção**. `supabase test db` roda tudo numa sessão psql contra um Postgres local recém-resetado: prova que o SQL está certo, e nada sobre alcançabilidade via PostgREST, sobre os grants terem sobrevivido ao apply hospedado, ou sobre as migrations sequer existirem lá. A Fase F é a prova: três RPCs de leitura passaram por um CI verde estando quebradas em toda chamada, e quem percebeu foi uma execução ao vivo.
+
+O que a execução provou, além do caminho feliz:
+
+- **O link não é uma vaga ao portador.** Quem convidou, de posse do token real, foi recusado — `P0002 invitation_not_available`.
+- **O link é gasto.** Repetir a aceitação devolve o *mesmo* sinal opaco, indistinguível de token que nunca existiu.
+- **A RLS acompanha na hora.** Antes de aceitar, a identidade convidada lia 0 empresas; depois, 1; depois da revogação, 0 de novo — sem novo login, sem cache a invalidar.
+- **`api.list_members` e `api.list_invitations` RODAM** sobre PostgREST e devolvem linhas. Esta é exatamente a classe de bug (`42702` em tempo de execução) que a Fase F deixou passar.
+- **`is_last_org_admin` chega ao painel** com o valor calculado pela mesma função que a revogação consulta.
+- **Escalada recusada ao vivo:** um `SST_OPERATOR` chamando `api.invite_member` recebe `42501`; o último `ORG_ADMIN` tentando se revogar recebe `23514 last_org_admin`.
+
+**O que este E2E não cobre, declarado:** a UI. Ele exerce as RPCs sobre PostgREST, não as páginas `/settings/team` e `/convite/<token>`. E ele deixa no `epi-dev` uma membership revogada e um convite aceito — que é o estado final correto por desenho (revogar, nunca apagar), não sujeira.
