@@ -6,7 +6,7 @@ create extension if not exists pgtap with schema extensions;
 
 begin;
 
-select plan(24);
+select plan(28);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -334,6 +334,45 @@ end $$;
 
 select is((select val from probe where label = 'attempt_mutable'), '42501',
   'hooks.delivery_attempts is append-only -- an attempt log that can be edited is not a log');
+
+
+-- ---------------------------------------------------------------------------------------
+-- 7. A revoked endpoint must not leave work queued forever.
+--    claim_webhook_batch only ever looks at ACTIVE endpoints, so a PENDING delivery on a
+--    revoked one is unreachable -- it sat PENDING indefinitely and kept
+--    oldest_pending_seconds growing, which would have armed the runner lateness alarm
+--    permanently on a queue that was idle. Found by an end-to-end run, not by reading.
+-- ---------------------------------------------------------------------------------------
+do 1913
+declare v_id uuid := (select val::uuid from probe where label = 'claim_delivery');
+begin
+  update hooks.deliveries set state = 'PENDING', settled_at = null, attempts = 1 where id = v_id;
+  update hooks.endpoints set status = 'ACTIVE', consecutive_failures = 0, disabled_at = null,
+         disabled_reason = null where id = 'e0000000-0000-4000-8000-00000000000a';
+  insert into probe values ('health_pending_before',
+    ((ops_rpc.webhook_health())->>'pending'));
+end 1913;
+
+select is((select val from probe where label = 'health_pending_before'), '1',
+  'a PENDING delivery on an ACTIVE endpoint counts as backlog');
+
+do 1913
+declare v_id uuid := (select val::uuid from probe where label = 'claim_delivery');
+begin
+  update hooks.endpoints set status = 'REVOKED' where id = 'e0000000-0000-4000-8000-00000000000a';
+  insert into probe values ('health_pending_after', ((ops_rpc.webhook_health())->>'pending'));
+  insert into probe values ('health_orphaned', ((ops_rpc.webhook_health())->>'orphaned'));
+  insert into probe values ('health_oldest', ((ops_rpc.webhook_health())->>'oldest_pending_seconds'));
+end 1913;
+
+select is((select val from probe where label = 'health_pending_after'), '0',
+  'work parked behind a non-ACTIVE endpoint is NOT counted as backlog');
+
+select is((select val from probe where label = 'health_orphaned'), '1',
+  'it is reported separately as orphaned rather than hidden -- an operator may still want to see it');
+
+select is((select val from probe where label = 'health_oldest'), '0',
+  'and it does not drive oldest_pending_seconds, which is what arms the lateness alarm');
 
 select * from finish();
 
