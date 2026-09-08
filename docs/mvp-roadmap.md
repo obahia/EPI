@@ -303,9 +303,17 @@ A leitura de `partner_relationships` no roadmap de expansão é ambígua: pode s
 | `npm run typecheck` / `lint` / `test` (218 testes, 9 novos em `invitation-token.test.ts`) | verde local |
 | `npm run build` | verde local, `/convite/[token]` e `/settings/team` presentes |
 | `npm run db:check:local` (PGlite) | as duas migrations aplicam de zero |
-| pgTAP `230_membership_invitations.sql` (22 asserções) | **escrita, ainda não executada** — exige Postgres real, roda só no CI |
+| pgTAP `230_membership_invitations.sql` (26 asserções) | **primeira execução no CI falhou no fixture, antes de qualquer asserção** — ver abaixo |
 | `scripts/concurrency-test.mjs` cenário 3 (duas aceitações simultâneas do mesmo token) | **escrito, ainda não executado** — exige duas conexões reais, roda só no CI |
 | Migrations aplicadas em `epi-dev` | **não** |
 | E2E ao vivo (convidar, aceitar em outra sessão, revogar) | **não** |
 
 Nada acima é relatado como funcionando por parecer certo. As três últimas linhas mudam quando houver evidência, não antes.
+
+### FASE G — o que a primeira execução do CI pegou
+
+**Bug no fixture da suíte, não no código da fase.** A suíte pedia à `api.onboard_organization` o tenant PARTNER de que precisava, mas o onboarding **sempre** grava `kind = 'DIRECT'`, e o índice `companies_one_per_direct_org` (FASE 0) então permite exatamente uma empresa por organização. A segunda `api.create_company` levantou `23505` e o arquivo abortou com *"You planned 22 tests but ran 0"* — **nenhuma asserção da fase chegou a rodar**.
+
+A restrição está certa e não foi tocada. Uma organização PARTNER é criada pelos operadores do próprio Selo hoje, não em self-service, então nenhuma RPC cunha uma — é justamente por isso que o fixture precisa inseri-la direto, do mesmo jeito que a `010_tenant_isolation.sql` monta seus dois tenants sob privilégio total antes de trocar de papel.
+
+**E o que a falha expôs de mais grave:** a suíte tinha o mesmo buraco que custou caro na Fase F. `api.list_members` e `api.list_invitations` são `RETURNS TABLE`, a forma exata que já quebrou quatro vezes neste código por `42702` em tempo de execução, e a suíte só checava a lista de retorno delas — **nunca as chamava**. Foi assim que `api.list_api_keys`, `api.list_webhook_deliveries` e `api.import_run_status` passaram por um CI verde estando quebradas em *toda* chamada. As duas agora são chamadas de verdade (seção 2b), o que levou a suíte de 22 para 26 asserções.

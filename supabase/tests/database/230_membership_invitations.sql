@@ -11,7 +11,7 @@ create extension if not exists pgtap with schema extensions;
 
 begin;
 
-select plan(22);
+select plan(26);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
@@ -249,6 +249,51 @@ select ok(
      where a.entity_table = 'membership_invitations' and a.data::text like '%@%'
   ),
   'and no email address is written into it -- the ids already answer who granted what scope');
+
+-- ---------------------------------------------------------------------------------------
+-- 2b. The two read RPCs, CALLED.
+--
+-- This section exists because of what Phase F cost. api.list_api_keys,
+-- api.list_webhook_deliveries and api.import_run_status all shipped through a green CI and
+-- were broken on EVERY call: a RETURNS TABLE OUT parameter shadowing a column in an
+-- unqualified predicate, which Postgres rejects with 42702 at runtime. A suite that only
+-- checks grants and RETURNS lists never calls them, so it never sees it -- and the panel's
+-- DAL swallowed the error into an empty array, so the screen rendered blank instead of
+-- failing. api.list_members and api.list_invitations are the same shape. They get called.
+-- ---------------------------------------------------------------------------------------
+do $
+declare v_org uuid := (select id from fx where label = 'org'); n int; v_flag boolean; v_status text;
+begin
+  set local role authenticated;
+  perform set_config('request.jwt.claims', '{"sub":"11110000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+
+  select count(*) into n from api.list_members(v_org);
+  insert into probe values ('members_n', n::text);
+
+  select m.is_last_org_admin into v_flag from api.list_members(v_org) m
+   where m.user_id = '11110000-0000-4000-8000-000000000001';
+  insert into probe values ('members_last_admin', coalesce(v_flag::text, 'NULL'));
+
+  select count(*) into n from api.list_invitations(v_org);
+  insert into probe values ('invitations_n', n::text);
+
+  select i.status into v_status from api.list_invitations(v_org) i
+   where i.invitation_id = (select id from fx where label = 'invite');
+  insert into probe values ('invitation_status', coalesce(v_status, 'NULL'));
+  reset role;
+exception when others then
+  insert into probe values ('reads_error', sqlstate || ' ' || sqlerrm);
+  reset role;
+end $;
+
+select is((select val from probe where label = 'members_n'), '3',
+  'api.list_members RUNS and returns the org''s three live memberships -- the org-wide admin, the company-scoped admin, and the operator who just accepted');
+select is((select val from probe where label = 'members_last_admin'), 'true',
+  'and computes is_last_org_admin from authz.is_last_org_admin itself, so the panel disables exactly what the database would refuse');
+select is((select val from probe where label = 'invitations_n'), '2',
+  'api.list_invitations RUNS and returns both invitations, the open one and the spent one');
+select is((select val from probe where label = 'invitation_status'), 'ACCEPTED',
+  'with the redeemed invitation reported as ACCEPTED rather than silently vanishing from the list');
 
 -- ---------------------------------------------------------------------------------------
 -- 3. Lockout. Every organization has exactly one user on the day it is created, so without
