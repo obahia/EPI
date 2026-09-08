@@ -19,7 +19,8 @@
     "db:diff": "supabase db diff",
     "db:push": "supabase db push",
     "db:test": "supabase test db",
-    "db:check:local": "node scripts/check-db-local.mjs"
+    "db:check:local": "node scripts/check-pgtap-lint.mjs && node scripts/check-db-local.mjs",
+    "db:lint:pgtap": "node scripts/check-pgtap-lint.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

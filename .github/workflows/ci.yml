@@ -100,6 +100,13 @@ jobs:
       - name: Apply every migration from a clean database + seed
         run: supabase db reset
 
+      # Lexical guard for the two ways a pgTAP file has actually broken in this repo: a
+      # shell expanding a dollar-quote delimiter into its own PID, and plan(N) lower than
+      # the assertions written. Runs BEFORE the suite so a failure names the cause instead
+      # of surfacing as a syntax error 300 lines into a file.
+      - name: Lint pgTAP files (dollar quotes, plan counts)
+        run: node scripts/check-pgtap-lint.mjs
+
       - name: Run pgTAP suite (every file under supabase/tests/database -- schema invariants, tenant isolation, and the full A+B+C expansion suite)
         run: supabase test db
 
