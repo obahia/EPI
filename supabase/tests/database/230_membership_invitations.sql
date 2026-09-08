@@ -48,36 +48,40 @@ grant all on probe to authenticated;
 
 -- A PARTNER-shaped tenant: one organization, two client companies. This is the customer
 -- the tenancy model was designed around and the one that could not have a second member.
-do $$
-declare v_company_id uuid; v_org_id uuid; v_second uuid;
-begin
-  set local role authenticated;
-  perform set_config('request.jwt.claims', '{"sub":"11110000-0000-4000-8000-000000000001","role":"authenticated"}', true);
-  select company_id into v_company_id
-  from api.onboard_organization('Clinica SST LTDA', '12345678000190', 'Cliente Um LTDA', '12345678000190', null);
-  insert into fx values ('company_one', v_company_id);
-  select organization_id into v_org_id from app.companies where id = v_company_id;
-  insert into fx values ('org', v_org_id);
-  select api.create_company(v_org_id, 'Cliente Dois LTDA', '98765432000109', null) into v_second;
-  insert into fx values ('company_two', v_second);
-  reset role;
-end $$;
+--
+-- Built by direct insert as the migration/superuser role, not through api.onboard_organization,
+-- because onboarding cannot produce this shape: it always writes kind 'DIRECT', and
+-- companies_one_per_direct_org (FASE 0) then allows exactly one company per organization.
+-- That constraint is correct and stays untouched -- a PARTNER organization is created by
+-- Selo's own operators today, not self-serve, so no RPC mints one. Same setup technique as
+-- 010_tenant_isolation.sql: full privilege for the fixture, then switch role to prove what a
+-- restricted role can and cannot do.
+insert into app.organizations (id, kind, legal_name, cnpj) values
+  ('11110000-0000-4000-9000-0000000000a1', 'PARTNER', 'Clinica SST LTDA', '12345678000190'),
+  ('22220000-0000-4000-9000-0000000000b1', 'DIRECT', 'Outro Tenant LTDA', '11222333000181');
 
--- A separate tenant, for the cross-organization assertion.
-do $$
-declare v_company_id uuid;
-begin
-  set local role authenticated;
-  perform set_config('request.jwt.claims', '{"sub":"22220000-0000-4000-8000-000000000001","role":"authenticated"}', true);
-  select company_id into v_company_id
-  from api.onboard_organization('Outro Tenant LTDA', '11222333000181', 'Outro LTDA', '11222333000181', null);
-  insert into fx values ('other_company', v_company_id);
-  insert into fx select 'other_org', organization_id from app.companies where id = v_company_id;
-  reset role;
-end $$;
+insert into app.companies (id, organization_id, organization_kind, cnpj, legal_name) values
+  ('11110000-0000-4000-9000-0000000000c1', '11110000-0000-4000-9000-0000000000a1', 'PARTNER', '12345678000190', 'Cliente Um LTDA'),
+  ('11110000-0000-4000-9000-0000000000c2', '11110000-0000-4000-9000-0000000000a1', 'PARTNER', '98765432000109', 'Cliente Dois LTDA'),
+  ('22220000-0000-4000-9000-0000000000c9', '22220000-0000-4000-9000-0000000000b1', 'DIRECT', '11222333000181', 'Outro LTDA');
 
-select is((select count(*)::int from fx), 5,
-  'partner tenant with two client companies, plus a separate tenant');
+insert into authz.memberships (user_id, organization_id, company_id, role, accepted_at) values
+  ('11110000-0000-4000-8000-000000000001', '11110000-0000-4000-9000-0000000000a1', null, 'ORG_ADMIN', now()),
+  ('22220000-0000-4000-8000-000000000001', '22220000-0000-4000-9000-0000000000b1', null, 'ORG_ADMIN', now());
+
+insert into fx values
+  ('org', '11110000-0000-4000-9000-0000000000a1'),
+  ('company_one', '11110000-0000-4000-9000-0000000000c1'),
+  ('company_two', '11110000-0000-4000-9000-0000000000c2'),
+  ('other_org', '22220000-0000-4000-9000-0000000000b1'),
+  ('other_company', '22220000-0000-4000-9000-0000000000c9');
+
+select is(
+  (select count(*)::int from app.companies c
+    where c.organization_id = '11110000-0000-4000-9000-0000000000a1'
+      and c.organization_kind = 'PARTNER'),
+  2,
+  'a PARTNER organization carrying two client companies -- the shape that had no way to be staffed');
 
 -- The COMPANY_ADMIN this suite escalates FROM, scoped to company_one only.
 insert into authz.memberships (user_id, organization_id, company_id, role, accepted_at)
