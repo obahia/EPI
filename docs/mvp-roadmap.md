@@ -303,12 +303,12 @@ A leitura de `partner_relationships` no roadmap de expansão é ambígua: pode s
 | `npm run typecheck` / `lint` / `test` (218 testes, 9 novos em `invitation-token.test.ts`) | verde local |
 | `npm run build` | verde local, `/convite/[token]` e `/settings/team` presentes |
 | `npm run db:check:local` (PGlite) | as duas migrations aplicam de zero |
-| pgTAP `230_membership_invitations.sql` (26 asserções) | **duas execuções falhas, ambas por bug meu na suíte** — 16/16 das que chegaram a rodar passaram; ver abaixo |
-| `scripts/concurrency-test.mjs` cenário 3 (duas aceitações simultâneas do mesmo token) | **escrito, ainda não executado** — exige duas conexões reais, roda só no CI |
+| pgTAP `230_membership_invitations.sql` (26 asserções) | **26/26 PASS** na terceira execução; as duas falhas anteriores foram bugs meus na suíte, não no código — ver abaixo |
+| `scripts/concurrency-test.mjs` cenário 3 (duas aceitações simultâneas do mesmo token) | **PASS** — duas conexões Postgres independentes, exatamente uma membership criada |
 | Migrations aplicadas em `epi-dev` | **sim** — confirmado pela primeira chamada bem-sucedida a `api.invite_member` sobre PostgREST, não por inspeção |
 | E2E ao vivo (`scripts/e2e-phase-g.mjs`, 19 verificações) | **19/19 PASS** contra o `epi-dev` real |
 
-Nada acima é relatado como funcionando por parecer certo. As três últimas linhas mudam quando houver evidência, não antes.
+Nada acima foi relatado como funcionando por parecer certo. Cada linha mudou quando houve evidência, e as duas primeiras execuções do CI provam que a distinção não é cerimônia: a suíte estava escrita, aplicava limpo em PGlite e passava no lint — e mesmo assim nenhuma das suas asserções tinha rodado.
 
 ### FASE G — o que a primeira execução do CI pegou
 
@@ -346,3 +346,21 @@ O que a execução provou, além do caminho feliz:
 O check foi reescrito para parar de reconhecer assinaturas e passar a verificar a propriedade: **todo `$` num arquivo destes pertence a um delimitador bem formado** (`$$` ou `$tag$`). Tira os bem formados e o que sobrar é um delimitador que perdeu caractere — verdade num arquivo correto independentemente de como foi corrompido. Verificado nas duas direções: zero falsos positivos nas 23 suítes boas, e falha nas duas linhas certas quando o arquivo é corrompido do jeito que o `replace()` corrompeu.
 
 Terceira vez que esta classe de bug custa um round de CI, e a segunda em que o guarda escrito para ela olhava para a forma anterior em vez de para a propriedade.
+
+### FASE G — encerrada (CI verde, 2026-09-08)
+
+Suíte completa verde: 24 arquivos pgTAP, 373 asserções, incluindo as 26 da Fase G; a corrida de duas conexões sobre o mesmo token de convite; `typecheck`, `lint`, 218 testes unitários, build de produção e a suíte Playwright.
+
+**As cinco camadas de verificação, e o que só cada uma pegou.** Vale registrar porque a fase é o argumento mais limpo até agora de que nenhuma delas substitui a anterior:
+
+| Camada | O que ela pegou nesta fase |
+|---|---|
+| Testes unitários | nada — o token e o hash estavam certos desde o começo |
+| `db:check:local` (PGlite) | nada — as migrations sempre aplicaram limpo |
+| Lint pgTAP | nada na primeira passada, e esse é o ponto: ele reconhecia a *forma* das duas falhas anteriores, não a propriedade |
+| CI (Postgres real) | duas falhas, ambas bugs meus na suíte: um fixture pedindo à `onboard_organization` uma organização PARTNER que ela nunca produz, e um delimitador de dollar quote comido pelo `String.replace` |
+| E2E ao vivo (`epi-dev`) | a única prova de que as RPCs são alcançáveis por PostgREST, de que os grants sobreviveram ao apply hospedado, e de que as migrations estão de fato lá |
+
+Parar no CI verde teria deixado a exposição hospedada sem evidência nenhuma. Parar no E2E ao vivo teria deixado a escalada de privilégio sem prova sistemática — o E2E cobre um caminho por vez; a suíte cobre as sete recusas de `auth_ctx.can_grant_role` de uma vez.
+
+**Fora do escopo, declarado e não silenciado:** acesso entre organizações (`partner_relationships`), *break-glass* de plataforma (as tabelas da FASE 0 continuam sem código), envio de e-mail de convite, e teste automatizado das páginas `/settings/team` e `/convite/<token>` — o E2E dirige as RPCs, não a UI.
