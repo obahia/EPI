@@ -1,0 +1,105 @@
+name: Webhook runner
+
+# Drains the webhook outbox by calling the app's internal runner route.
+#
+# WHY HERE AND NOT vercel.json. Vercel Cron only offers minute-level granularity on Pro;
+# on Hobby the minimum is once per day, and a webhook delivered up to 24h late is not a
+# webhook. GitHub Actions is free for this public repository, the secrets and logs already
+# live here, and the runner is `claim -> HTTP -> report` -- three short calls -- so who
+# invokes it is a scheduling detail, not an architectural one.
+#
+# WHAT THIS COSTS, stated plainly rather than discovered later:
+#   * GitHub's minimum schedule interval is 5 minutes, and scheduled workflows are
+#     genuinely delayed under load -- 10-30 minutes is not unusual at peak. Expected
+#     delivery latency is therefore minutes, not the ~30s a per-minute cron would give.
+#     Subscribers must be told this; it is not a transient condition.
+#   * GitHub disables scheduled workflows on repositories with no commit activity for 60
+#     days. A quiet repo silently stops delivering webhooks.
+# Neither is acceptable for a paying production tenant. Both are fine for dev and for a
+# first customer who has been told the number.
+
+on:
+  schedule:
+    # Every 5 minutes -- GitHub's floor. Not a guarantee: see above.
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why this manual run (shows up in the log)'
+        required: false
+        default: 'manual drain'
+
+concurrency:
+  # Never two drains at once. The database would cope -- FOR UPDATE SKIP LOCKED makes
+  # double-claiming impossible -- but overlapping runs would compete for the same batch and
+  # waste the invocation, and a backed-up queue is exactly when that would happen.
+  group: webhook-runner
+  cancel-in-progress: false
+
+jobs:
+  drain:
+    name: Drain the webhook outbox
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check configuration
+        id: config
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$CRON_SECRET" ]; then
+            # Skip rather than fail. A red X every five minutes on a repo with no deployment
+            # trains everyone to ignore this workflow, which is worse than it being silent.
+            echo "::notice::APP_BASE_URL variable or CRON_SECRET secret not set -- nothing deployed to drain. Skipping."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Call the runner
+        if: steps.config.outputs.configured == 'true'
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          # --fail-with-body so a non-2xx fails the step AND still shows the body; the route
+          # answers 401 when the secret does not match, and that must be loud, not silent.
+          RESPONSE=$(curl -sS --fail-with-body --max-time 300 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${APP_BASE_URL}/api/internal/webhook-runner")
+          echo "$RESPONSE"
+          # oldest_pending_seconds is the signal that the runner has stopped keeping up --
+          # nothing else in the product fails when webhooks fall behind, so this is the only
+          # place it becomes visible.
+          OLDEST=$(echo "$RESPONSE" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{console.log(JSON.parse(d).health?.oldest_pending_seconds??0)}catch{console.log(0)}})")
+          if [ "$OLDEST" -gt 900 ]; then
+            echo "::warning::Oldest pending webhook delivery is ${OLDEST}s old (>15min). The queue is not keeping up."
+          fi
+
+  cleanup:
+    name: Daily cleanup (idempotency, settled deliveries, quota)
+    runs-on: ubuntu-latest
+    # Only on the 4am run -- the schedule fires every 5 minutes and this work is daily.
+    if: github.event_name == 'schedule' && startsWith(github.event.schedule, '*/5')
+    steps:
+      - name: Call maintenance at 04:00 UTC only
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APP_BASE_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "::notice::Not configured -- skipping."
+            exit 0
+          fi
+          HOUR=$(date -u +%H); MINUTE=$(date -u +%M)
+          # A single schedule entry drives both jobs, so the daily one gates on the clock.
+          # Five-minute granularity means this window is hit exactly once per day.
+          if [ "$HOUR" != "04" ] || [ "$MINUTE" -ge 5 ]; then
+            echo "Not the 04:00 UTC window (now ${HOUR}:${MINUTE}) -- nothing to do."
+            exit 0
+          fi
+          curl -sS --fail-with-body --max-time 300 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${APP_BASE_URL}/api/internal/maintenance"

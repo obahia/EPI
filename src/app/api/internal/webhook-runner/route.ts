@@ -5,7 +5,11 @@ import { decryptWebhookSecret } from "@/lib/crypto/webhook-secret";
 import { deliverWebhook } from "@/lib/webhooks/deliver";
 
 /**
- * The webhook runner. Invoked by Vercel Cron (see vercel.json) once a minute.
+ * The webhook runner. Invoked by a GitHub Actions schedule (.github/workflows/webhook-runner.yml)
+ * every 5 minutes -- NOT by Vercel Cron, whose minute-level granularity is a Pro-plan feature
+ * this project does not have. Expected delivery latency is therefore minutes, and GitHub
+ * delays scheduled workflows further under load. That number is documented for subscribers
+ * rather than quietly hoped away.
  *
  * WHY THIS SHAPE. The runner does claim -> HTTP -> report as three separate short calls, so
  * no transaction is ever held open across network I/O. FOR UPDATE SKIP LOCKED runs entirely
@@ -18,12 +22,19 @@ import { deliverWebhook } from "@/lib/webhooks/deliver";
  * outbox simply accumulates durably and drains on recovery.
  */
 export const runtime = "nodejs";
-export const maxDuration = 300;
+// 60, not 300. 300 is a Pro-plan value and this project is not on Pro -- see
+// .github/workflows/webhook-runner.yml for why the scheduler moved to GitHub Actions.
+// 60 is valid on both plans, so this file does not have to change if the plan does.
+export const maxDuration = 60;
 export const preferredRegion = "gru1";
 
-/** 50 x 10s timeout / 8 concurrent = ~63s worst case, comfortably inside maxDuration. */
-const BATCH_SIZE = 50;
+/** 24 / 8 concurrent = 3 waves x 10s timeout = ~30s worst case for a single batch. */
+const BATCH_SIZE = 24;
 const CONCURRENCY = 8;
+/** Leaves headroom under maxDuration for the final report calls and cold start. */
+const DEADLINE_MS = 45_000;
+/** The worst a single batch can take. A new batch only starts if this still fits. */
+const WORST_BATCH_MS = 32_000;
 
 type ClaimedDelivery = {
   delivery_id: string;
@@ -62,7 +73,7 @@ async function runBatch(): Promise<{ claimed: number; succeeded: number; failed:
   let failed = 0;
 
   // A fixed-size worker pool rather than Promise.all over the whole batch: one slow
-  // subscriber must not be able to hold 50 sockets open at once.
+  // subscriber must not be able to hold every socket in the batch open at once.
   const queue = [...deliveries];
   const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
     for (;;) {
@@ -115,7 +126,7 @@ async function runBatch(): Promise<{ claimed: number; succeeded: number; failed:
 }
 
 export async function GET(request: NextRequest) {
-  // Vercel Cron issues GET. POST is accepted too so the route can be triggered manually
+  // The scheduler issues GET. POST is accepted too so the route can be triggered manually
   // during an incident without pretending to be the scheduler.
   return handle(request);
 }
@@ -133,13 +144,31 @@ async function handle(request: NextRequest): Promise<Response> {
   }
 
   try {
-    const result = await runBatch();
+    // Drain repeatedly inside one invocation rather than once. The scheduler now fires every
+    // five minutes instead of every minute, so a single 24-delivery batch per invocation
+    // would cap throughput at ~288/hour -- fine for a quiet tenant, not for a busy one. A
+    // new batch only starts while a worst-case batch still fits in the remaining budget, so
+    // this never risks being cut off mid-flight with deliveries left IN_FLIGHT.
+    const started = Date.now();
+    const totals = { claimed: 0, succeeded: 0, failed: 0, batches: 0 };
+
+    for (;;) {
+      const result = await runBatch();
+      totals.claimed += result.claimed;
+      totals.succeeded += result.succeeded;
+      totals.failed += result.failed;
+      totals.batches += 1;
+
+      if (result.claimed === 0) break;
+      if (Date.now() - started + WORST_BATCH_MS > DEADLINE_MS) break;
+    }
+
     const supabase = createMachineClient();
     const { data: health } = await supabase.schema("ops_rpc").rpc("webhook_health");
 
     // Surfaced so an uptime check can alert on it: a growing oldest_pending_seconds is the
     // signal that the runner has stopped, and nothing else in the product would fail.
-    return new Response(JSON.stringify({ ...result, health }), {
+    return new Response(JSON.stringify({ ...totals, health }), {
       status: 200,
       headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
     });

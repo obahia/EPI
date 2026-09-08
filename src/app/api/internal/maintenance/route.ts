@@ -12,7 +12,7 @@ import { createMachineClient } from "@/lib/supabase/machine-client";
  * confused with purging the record.
  */
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 60;
 export const preferredRegion = "gru1";
 
 function isAuthorized(request: NextRequest): boolean {

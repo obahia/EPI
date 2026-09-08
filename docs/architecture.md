@@ -459,7 +459,7 @@ Sem confirmação offline — servidor é obrigatório para preservar consistên
 - Vercel, região de função fixada em `gru1` (São Paulo/`sa-east-1`) — **isto é possível em qualquer plano**, não exige Enterprise (só *multi*-região exige Pro+); confirmado contra a documentação atual, corrigindo uma suposição inicial errada.
 - Runtime Node (nunca Edge) em toda rota que toca o pepper de token ou credenciais — `proxy.ts`/middleware roda só como checagem otimista.
 - Supabase, projeto dedicado, `sa-east-1`, Postgres 17.
-- **Fase F:** `vercel.json` fixa `regions: ["gru1"]` e declara dois crons — `/api/internal/webhook-runner` a cada minuto (exige plano **Pro**; no Hobby o mínimo é 1×/dia e webhooks ficam inviáveis) e `/api/internal/maintenance` diário. Ambas as rotas **falham fechadas** quando `CRON_SECRET` não está configurado. Note que, apesar desta seção existir desde a FASE 0, **nada está implantado**: não há projeto Vercel configurado no repositório e o CI não faz deploy.
+- **Fase F:** `vercel.json` fixa apenas `regions: ["gru1"]`. O agendamento do runner NÃO está lá: ficou em `.github/workflows/webhook-runner.yml` (ver §24). `maxDuration` das rotas internas é 60, valor válido tanto no Hobby quanto no Pro, para que o arquivo não precise mudar se o plano mudar. Note que, apesar desta seção existir desde a FASE 0, **nada está implantado**: não há projeto Vercel configurado no repositório e o CI não faz deploy.
 - CI: `supabase/setup-cli@v1`, `supabase db reset` (aplica migrations do zero) + pgTAP em todo PR; `supabase db push` em staging/produção via workflow separado, nunca `db push` manual contra produção.
 - Falha de plano Pro relevante e verificada: **failover multi-região de Vercel Functions é recurso Enterprise** — no plano Pro, uma indisponibilidade regional é uma indisponibilidade, ponto. Isso é uma decisão de negócio (aceitar o risco vs. pagar Enterprise), não um detalhe técnico — sinalizado em §20.
 
@@ -660,9 +660,11 @@ Decisão final por **allowlist**: o endereço precisa ser unicast público globa
 
 ### Runner
 
-Vercel Cron (`vercel.json`) a cada minuto, chamando `/api/internal/webhook-runner` com o segredo do agendador; limpeza diária em `/api/internal/maintenance`. Ambas as rotas **falham fechadas** quando nenhum segredo está configurado.
+**GitHub Actions**, não Vercel Cron (`.github/workflows/webhook-runner.yml`). O cron de granularidade de minutos da Vercel é recurso do plano Pro, que este projeto não tem; no Hobby o mínimo é diário, e um webhook entregue com até 24 h de atraso não é um webhook. O workflow chama `/api/internal/webhook-runner` com o `CRON_SECRET`, a cada 5 minutos — o piso do GitHub. Limpeza diária em `/api/internal/maintenance`, no mesmo workflow, com janela por relógio. Ambas as rotas **falham fechadas** quando nenhum segredo está configurado, e o workflow **pula** (não falha) quando `APP_BASE_URL`/`CRON_SECRET` não existem — um X vermelho a cada cinco minutos num repo sem deploy ensina todo mundo a ignorar o workflow.
 
-`claim -> HTTP -> report` são três chamadas curtas, então nenhuma transação atravessa I/O de rede e `FOR UPDATE SKIP LOCKED` funciona normalmente a partir de uma função serverless — duas invocações sobrepostas nunca pegam a mesma entrega. Latência p50 esperada de ~30 s (metade do intervalo), declarada ao cliente, não escondida. Cron de 1 minuto exige plano **Vercel Pro**.
+**O custo desta escolha, declarado e não descoberto depois:** o mínimo do GitHub é 5 minutos e agendamentos lá atrasam de verdade sob carga (10–30 min não é incomum no pico), então a latência esperada de entrega é de **minutos, não os ~30 s** que um cron por minuto daria. Além disso, o GitHub desativa schedules em repositório sem commit por 60 dias — um repo quieto para de entregar webhooks silenciosamente. Nenhum dos dois é aceitável para um tenant pagante em produção; ambos são adequados para dev e para um primeiro cliente que foi informado do número.
+
+`claim -> HTTP -> report` são três chamadas curtas, então nenhuma transação atravessa I/O de rede e `FOR UPDATE SKIP LOCKED` funciona normalmente a partir de uma função serverless — duas invocações sobrepostas nunca pegam a mesma entrega. Latência p50 esperada de ~2,5 min (metade do intervalo de 5 min), mais o atraso do agendador do GitHub — declarada ao cliente, não escondida.
 
 Durante indisponibilidade do runner, o outbox acumula de forma durável e drena na retomada; nada se perde. Alerta quando o `PENDING` mais antigo passa de 15 min — é o sinal de que o runner parou, e nada mais no produto falharia.
 
