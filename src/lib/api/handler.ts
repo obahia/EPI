@@ -114,8 +114,36 @@ export async function withApiKey(
       url: new URL(request.url),
     });
   } catch (error) {
-    // An exception that escapes a handler is a bug in our code, not a client error. It is
-    // reported as an opaque 500 with the request id, and the detail stays in our logs.
+    // A missing or malformed secret is a DEPLOYMENT problem, not a bug in the request path,
+    // and it fails every single call identically. Reporting it as 500 internal_error --
+    // which is what happened the first time this was deployed -- makes an operator hunt for
+    // a code defect that does not exist. 503 says "this is us, and it is not your request",
+    // without naming which variable is missing.
+    //
+    // The env vars are read lazily inside each helper, so a missing one cannot fail at boot;
+    // .env.example already warns about exactly this for the CPF secrets, and the Phase F
+    // additions inherited the same shape. This is the cheap mitigation: make the symptom
+    // legible. The full detail goes to our logs and never to the client.
+    const message = error instanceof Error ? error.message : String(error);
+    const isConfiguration =
+      message.includes("Missing required env var") ||
+      message.includes("env var. See .env.example") ||
+      message.includes("must decode to exactly 32 bytes");
+
+    if (isConfiguration) {
+      console.error(
+        `[api/v1] CONFIGURATION ERROR -- the deployment is missing or has a malformed secret. ` +
+          `request_id=${requestId} key=${parsed.keyId}: ${message}`,
+      );
+      const shape = apiErrorShape("service_unavailable");
+      return new Response(JSON.stringify(errorBody(shape, requestId)), {
+        status: shape.status,
+        headers: baseHeaders,
+      });
+    }
+
+    // Anything else escaping a handler is a bug in our code, not a client error. Opaque 500
+    // with the request id; the detail stays in our logs.
     console.error(`[api/v1] unhandled error request_id=${requestId} key=${parsed.keyId}`, error);
     const shape = apiErrorShape("internal_error");
     return new Response(JSON.stringify(errorBody(shape, requestId)), {

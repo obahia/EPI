@@ -76,6 +76,17 @@ const SIGNAL_MAP: ReadonlyArray<readonly [string, ApiErrorType]> = [
  * the database would silently publish an internal identifier as part of the public API.
  * `unmapped` is returned so the caller can raise an internal alert about it.
  */
+/**
+ * Longest signal first, so a specific signal always wins over a generic one it contains.
+ *
+ * Without this, `position_not_found` matched `not_found` -- which appears earlier in the
+ * list -- and a client sending an invalid position_id got 404 "resource not found", meaning
+ * "that employee does not exist", instead of 422 naming the field. Same for
+ * `location_not_found`. Sorting by length removes the trap rather than relying on whoever
+ * adds the next signal to notice it, which is what failed here.
+ */
+const SIGNALS_BY_SPECIFICITY = [...SIGNAL_MAP].sort((a, b) => b[0].length - a[0].length);
+
 export function mapRpcError(error: PostgrestError): { shape: ApiErrorShape; unmapped: boolean } {
   const message = error.message ?? "";
 
@@ -85,7 +96,7 @@ export function mapRpcError(error: PostgrestError): { shape: ApiErrorShape; unma
     return { shape: apiErrorShape("conflict"), unmapped: false };
   }
 
-  for (const [signal, type] of SIGNAL_MAP) {
+  for (const [signal, type] of SIGNALS_BY_SPECIFICITY) {
     if (message.includes(signal)) return { shape: apiErrorShape(type), unmapped: false };
   }
 
