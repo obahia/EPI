@@ -160,7 +160,7 @@ async function main() {
     { id: 'B0', label: 'trigger absent (BASELINE)', trigger: false, endpoint: false, backlog: 0 },
     { id: 'B1', label: 'trigger present, no endpoints', trigger: true, endpoint: false, backlog: 0 },
     { id: 'B2', label: 'trigger present, 1 endpoint, runner OFF', trigger: true, endpoint: true, backlog: 0 },
-    { id: 'B3', label: 'B2 + 10k row backlog, runner OFF', trigger: true, endpoint: true, backlog: BACKLOG_ROWS },
+    { id: 'B3', label: `B2 + ${BACKLOG_ROWS.toLocaleString('en-US')} row backlog, runner OFF`, trigger: true, endpoint: true, backlog: BACKLOG_ROWS },
   ];
 
   const report = [];
@@ -180,19 +180,38 @@ async function main() {
       );
     }
 
+    let backlogSeeded = 0;
     if (config.backlog > 0) {
-      // A backlog built directly, not by generating 10k business events -- the point is the
-      // table's size at claim time, and generating it through the trigger would take as long
-      // as the benchmark itself.
+      // The backlog is GENERATED, not copied. The first version of this script seeded it by
+      // selecting up to `backlog` existing rows out of audit.audit_events for this tenant --
+      // and there were only ~3,960 of them by the time B3 ran, so a configuration labelled
+      // "10k backlog" actually measured about 4k. The label lied, and the run had to be
+      // reported with that caveat.
+      //
+      // Generating the events instead means the requested size is the size that exists, and
+      // the rows arrive through the real trigger rather than being hand-assembled. It runs
+      // entirely server-side in one statement, so it costs one round trip regardless of N.
       await admin.query(
-        `insert into hooks.outbox (audit_event_id, organization_id, event_type, seq, occurred_at)
-         select a.id, a.organization_id, a.event_type, a.seq, a.created_at
-           from audit.audit_events a
-          where a.organization_id = $1
-          limit $2
-         on conflict (audit_event_id) do nothing`,
+        `select app.log_audit_event($1, null, 'EMPLOYEE_CREATED', 'app.employees',
+                                    gen_random_uuid(), 'USER', null,
+                                    '{"data_origin":"MANUAL"}'::jsonb)
+           from generate_series(1, $2)`,
         [tenant.organizationId, config.backlog],
       );
+
+      const seeded = await admin.query(
+        'select count(*)::int as n from hooks.outbox where organization_id = $1',
+        [tenant.organizationId],
+      );
+      backlogSeeded = seeded.rows[0].n;
+
+      // Fail loudly rather than quietly measuring a smaller backlog than the label claims --
+      // that is exactly the mistake this replaces.
+      if (backlogSeeded < config.backlog) {
+        throw new Error(
+          `backlog seeding produced ${backlogSeeded} rows, expected at least ${config.backlog}`,
+        );
+      }
     }
 
     const sequential = [];
@@ -236,6 +255,7 @@ async function main() {
       S4_concurrent_same_org: summarize(concurrentSame),
       S5_concurrent_distinct_org: summarize(concurrentDistinct),
       throughput_tx_per_s: Number(median(throughputs).toFixed(1)),
+      backlog_seeded: backlogSeeded,
       lock_wait_observations: lockWaitObservations,
       outbox_rows_after: outboxRows.rows[0].n,
     });
@@ -261,7 +281,9 @@ async function main() {
       `  S5 concurrent diff p50=${row.S5_concurrent_distinct_org.p50.toFixed(3)}ms  p95=${row.S5_concurrent_distinct_org.p95.toFixed(3)}ms`,
     );
     console.log(
-      `  throughput=${row.throughput_tx_per_s} tx/s   lock-wait samples=${row.lock_wait_observations}   outbox rows after=${row.outbox_rows_after}\n`,
+      `  throughput=${row.throughput_tx_per_s} tx/s   lock-wait samples=${row.lock_wait_observations}` +
+        (row.backlog_seeded > 0 ? `   backlog seeded=${row.backlog_seeded}` : '') +
+        `   outbox rows after=${row.outbox_rows_after}\n`,
     );
   }
 
