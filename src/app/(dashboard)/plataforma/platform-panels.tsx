@@ -180,7 +180,9 @@ export function MyGrantsPanel({ grants }: { grants: PlatformGrant[] }) {
                         g.organizationName
                       )}
                     </TableCell>
-                    <TableCell className="max-w-xs text-muted-foreground">{g.reason}</TableCell>
+                    <TableCell className="max-w-xs whitespace-normal break-words text-muted-foreground">
+                      {g.reason}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{formatMoment(g.expiresAt)}</TableCell>
                     <TableCell>{g.useCount}</TableCell>
                     <TableCell>{grantState(g)}</TableCell>

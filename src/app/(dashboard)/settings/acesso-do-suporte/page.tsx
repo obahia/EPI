@@ -55,10 +55,8 @@ export default async function SupportAccessPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Quem</TableHead>
-                  <TableHead>Aprovado por</TableHead>
                   <TableHead>Motivo</TableHead>
                   <TableHead>Período</TableHead>
-                  <TableHead>Uso</TableHead>
                   <TableHead>Situação</TableHead>
                 </TableRow>
               </TableHeader>
@@ -68,9 +66,11 @@ export default async function SupportAccessPage() {
                     <TableCell>
                       <span className="font-bold">{g.adminName}</span>
                       <span className="block text-[12px] text-muted-foreground">{g.adminEmail}</span>
+                      <span className="block text-[12px] text-muted-foreground">
+                        aprovado por {g.grantedByName}
+                      </span>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{g.grantedByName}</TableCell>
-                    <TableCell className="max-w-xs">
+                    <TableCell className="max-w-md whitespace-normal break-words">
                       {g.reason}
                       {g.ticketRef ? (
                         <span className="block text-[12px] text-muted-foreground">
@@ -84,19 +84,16 @@ export default async function SupportAccessPage() {
                         até {new Date(g.expiresAt).toLocaleString("pt-BR")}
                       </span>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {g.useCount === 0 ? (
-                        "Nunca usado"
-                      ) : (
-                        <>
-                          {g.useCount}×
-                          <span className="block text-[12px]">
-                            desde {new Date(g.firstUsedAt ?? g.grantedAt).toLocaleString("pt-BR")}
-                          </span>
-                        </>
-                      )}
+                    <TableCell>
+                      {stateOf(g)}
+                      <span className="block text-[12px] text-muted-foreground">
+                        {g.useCount === 0
+                          ? "Nunca usado"
+                          : `Usado ${g.useCount}× desde ${new Date(
+                              g.firstUsedAt ?? g.grantedAt,
+                            ).toLocaleString("pt-BR")}`}
+                      </span>
                     </TableCell>
-                    <TableCell>{stateOf(g)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

@@ -412,6 +412,17 @@ Um terceiro achado foi de desenho, não bug: o bloco `org_wide_grant_required` e
 | `typecheck` / `lint` / 218 testes unitários / build | verde local; `/plataforma`, `/plataforma/[organizationId]` e `/settings/acesso-do-suporte` presentes |
 | `db:check:local` (PGlite) | a migration aplica de zero |
 | pgTAP `240_platform_break_glass.sql` (32 asserções) | **32/32 PASS** no CI, na primeira execução |
-| E2E ao vivo / UI | **não** |
+| E2E ao vivo (`scripts/e2e-phase-h.mjs`, 18 verificações) | **18/18 PASS** contra o `epi-dev` real |
+| E2E de UI (`scripts/e2e-phase-h-ui.mjs`, 15 verificações) | **15/15 PASS**, navegador real sobre build de produção |
 
 As duas últimas linhas mudam quando houver evidência, não antes.
+
+### FASE H — verificação ao vivo e de UI
+
+**RPCs (`scripts/e2e-phase-h.mjs`, 18/18).** Três identidades diferentes — um `SUPER` de plataforma, um `SUPPORT`, e o admin do próprio cliente — cada uma com sessão própria pela chave publicável. Provou ao vivo: ser da equipe **não** é acesso (`42501 no_live_platform_grant` sem concessão); cliente comum não enumera os clientes do fornecedor; quatro olhos recusa autoconcessão (`four_eyes_required`); motivo curto recusado; as três leituras sob concessão **rodam** por PostgREST (a classe `RETURNS TABLE` que passou verde na Fase F estando quebrada); concessão num tenant não abre outro; suporte não põe estranho na conta do cliente (`not_a_member`); o cliente lê o motivo e vê `use_count=3` com `first_used_at` — usada, não só autorizada; e revogar corta o acesso na hora.
+
+O primeiro `SUPER` foi semeado à mão, uma vez. O script provisiona as identidades mas **não** consegue pô-las no cadastro, e na primeira execução ele para dizendo isso — parada esperada, não falha da funcionalidade.
+
+**UI (`scripts/e2e-phase-h-ui.mjs`, 15/15), e um defeito real que só a captura mostrou.** A tabela de `/settings/acesso-do-suporte` tinha seis colunas e o `TableCell` do repo carrega `whitespace-nowrap`: um `max-w-*` sem `truncate` fecha a caixa enquanto o texto continua correndo e **pinta por cima da coluna seguinte**. O motivo colidia com o período, e a coluna Situação ficava cortada fora da tela. As outras quatro células limitadas do repositório já pareavam `max-w-*` com `truncate` — a convenção certa estava ali; as minhas duas é que a ignoraram. Aqui truncar não servia (o motivo é justamente o que o cliente tem direito de ler inteiro), então elas quebram linha, e a tabela foi dobrada de seis para quatro colunas.
+
+Duas das falhas daquela execução eram asserção minha, não a página: uma procurava um texto que a página não usa, e a outra comparava `Admins da organização` com sensibilidade a maiúsculas — `PanelKicker` aplica `uppercase` por CSS e `innerText` devolve o que foi **renderizado**.
