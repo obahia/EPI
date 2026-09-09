@@ -1,0 +1,9 @@
+{
+  "name": "selo-biometric-spike",
+  "private": true,
+  "type": "module",
+  "description": "Isolated Phase I spike. Deliberately NOT part of the product: its own dependency tree, no TypeScript, no product config touched.",
+  "dependencies": {
+    "onnxruntime-node": "^1.20.1"
+  }
+}
