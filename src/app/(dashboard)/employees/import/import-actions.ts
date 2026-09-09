@@ -7,6 +7,7 @@ import { isValidCpf, onlyDigits, maskCpf } from "@/lib/br/cpf";
 import { normalizePhoneE164 } from "@/lib/br/phone";
 import { hashCpf, encryptCpf } from "@/lib/crypto/cpf-secrets";
 import { describeRpcError } from "@/lib/supabase/rpc-error";
+import { reportFailure } from "@/lib/observability/report";
 import { getLocale } from "@/i18n/get-locale";
 import { getDictionary } from "@/i18n/dictionaries";
 import type { ReferenceResolution } from "@/lib/csv-import/resolve-references";
@@ -246,6 +247,7 @@ export async function finishImportRun(
     p_import_run_id: importRunId,
   });
   if (error) {
+    reportFailure("import.commit", error, { importRunId, signal: "finish_import_run_failed" });
     return { ok: false, error: describeRpcError(error, t.employees.importChunkFailed) };
   }
   return { ok: true, status: data as string };

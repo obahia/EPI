@@ -266,6 +266,8 @@ export function ImportWizard({ companyId }: { companyId: string }) {
       setResolving(false);
       if (!resolved.ok) {
         setCommitError(resolved.error);
+        setPartial(true);
+        setStep("done");
         return;
       }
       const applied = applyReferenceResolution(validation.validRows, resolved.resolutions);
@@ -276,6 +278,8 @@ export function ImportWizard({ companyId }: { companyId: string }) {
     if (rowsToImport.length === 0) {
       setResolutionErrors(referenceErrors);
       setCommitError(t.employees.importReferencesFailed);
+      setPartial(true);
+      setStep("done");
       return;
     }
     setResolutionErrors(referenceErrors);

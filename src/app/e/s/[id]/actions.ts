@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { hashWorkerToken } from "@/lib/crypto/worker-token";
 import { createWorkerClient } from "@/lib/supabase/worker-client";
 import { describeWorkerRpcError } from "@/lib/supabase/worker-rpc-error";
+import { reportFailure } from "@/lib/observability/report";
 import { getIdentityProvider } from "@/lib/identity/registry";
 import type { AssuranceLevel } from "@/lib/identity/provider";
 import { canonicalizeEvidencePayload, formatTimestampUtc } from "@/lib/evidence/canon";
@@ -118,6 +119,12 @@ export async function submitConfirm(_prevState: ConfirmState, formData: FormData
       .single();
 
     if (sourceError || !sourceData) {
+      // The confirmation cannot be sealed. The worker gets a message; without this line
+      // nobody on our side would ever learn it happened.
+      reportFailure("evidence.seal", sourceError, {
+        confirmationRequestId: viewId,
+        signal: "evidence_source_unavailable",
+      });
       revalidatePath(`/e/s/${viewId}`);
       return { error: describeWorkerRpcError(sourceError!), attemptsRemaining: null };
     }

@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { createMachineClient } from "@/lib/supabase/machine-client";
+import { reportFailure } from "@/lib/observability/report";
 
 /**
  * Daily cleanup. Expires idempotency records (24h TTL), settled webhook deliveries and
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest) {
   const { data, error } = await supabase.schema("ops_rpc").rpc("purge_expired");
 
   if (error) {
-    console.error("[maintenance] purge failed", error.message);
+    reportFailure("job.maintenance", error, { signal: "purge_failed" });
     return new Response(JSON.stringify({ error: "purge_failed" }), {
       status: 500,
       headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },

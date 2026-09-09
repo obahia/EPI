@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { createMachineClient } from "@/lib/supabase/machine-client";
 import { decryptWebhookSecret } from "@/lib/crypto/webhook-secret";
 import { deliverWebhook } from "@/lib/webhooks/deliver";
+import { reportFailure } from "@/lib/observability/report";
 
 /**
  * The webhook runner. Invoked by a GitHub Actions schedule (.github/workflows/webhook-runner.yml)
@@ -173,7 +174,7 @@ async function handle(request: NextRequest): Promise<Response> {
       headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
     });
   } catch (error) {
-    console.error("[webhook-runner] batch failed", error);
+    reportFailure("job.webhook_runner", error, { signal: "batch_failed" });
     return new Response(JSON.stringify({ error: "runner_failed" }), {
       status: 500,
       headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },

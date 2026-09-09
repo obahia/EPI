@@ -1,6 +1,7 @@
 # PILOT READINESS — Selo
 
 **Data da auditoria:** 2026-09-09
+**Última revisão:** 2026-09-09, após a rodada Pilot Production Readiness (P1-1, P1-3, P1-4, P1-5, P1-6)
 **Escopo:** determinar se conseguimos colocar **uma empresa real** no sistema e executar o fluxo completo de entrega de EPI, com segurança.
 **Não é escopo:** adicionar capacidades. Nenhum módulo novo foi construído para esta auditoria.
 
@@ -14,7 +15,8 @@ Cada afirmação aqui é **medida** ou **declarada como não medida**. Onde houv
 |---|---|
 | `scripts/pilot-readiness-probe.mjs` | Os 18 passos do cenário, executados contra o projeto `epi-dev` real, com o percurso do trabalhador conduzido no **navegador de verdade** |
 | `scripts/security-audit.mjs` | Auditoria de catálogo (RLS, `SECURITY DEFINER`, `search_path`, superfície `anon`, imutabilidade, PII) sobre o schema construído a partir das 69 migrations |
-| `.github/workflows/ci.yml` | 25 arquivos pgTAP + corridas reais de concorrência, em Postgres real |
+| `.github/workflows/ci.yml` | 26 arquivos pgTAP + corridas reais de concorrência, em Postgres real |
+| `scripts/e2e-import.mjs` | A importação de funcionários com um arquivo sintético de 201 linhas, pelo assistente real |
 | `scripts/e2e-phase-g.mjs`, `e2e-phase-h.mjs`, `*-ui.mjs` | Verificações ao vivo das fases G e H |
 
 **Por que o percurso do trabalhador roda no navegador e não por RPC:** selar evidência exige canonicalizar um payload em Node (`epi-canon/1`) antes de ele chegar ao Postgres. Uma sonda que chamasse `worker.finish_confirmation` direto teria de reimplementar esse passo — e então estaria testando a minha reimplementação, não o produto. O mesmo vale para cadastrar o funcionário: o hash e a cifra do CPF acontecem no app.
@@ -52,7 +54,7 @@ Três vereditos acima merecem qualificação, e escondê-la tornaria a tabela in
 
 - **#16 exigiu ligar um flag.** `compliance_enabled` nasce `false` em toda organização — decisão correta (nenhum tenant existente muda de comportamento), mas significa que **todo cliente novo precisa disso ligado deliberadamente**. Está no checklist de onboarding (§5). Sem isso o módulo responde `feature_disabled`, que é o comportamento certo, não um defeito.
 - **#18 não foi remedido nesta execução.** É citado das fases G (19/19) e H (18/18), onde revogar cortou a leitura na chamada seguinte, sem sessão a expirar. É evidência real, mas de ontem, não de hoje.
-- **#3 cobre cadastro, não importação.** O caminho de import CSV/XLSX existe (`/employees/import`, `/epis/import`, `app.import_runs`) e tem suíte pgTAP, mas **não foi exercitado nesta auditoria**. Ver P1-4.
+- **#3 agora cobre os dois caminhos.** O cadastro manual foi medido na sonda; a importação foi medida separadamente com um arquivo de 201 linhas (`scripts/e2e-import.mjs`, 12/12) — ver §8.4.
 
 ### 1.2 O que a própria sonda errou, e por que isso importa
 
@@ -82,82 +84,76 @@ Medido por `scripts/security-audit.mjs` salvo onde indicado.
 | **rate limiting** | **PASS** (plano do trabalhador) | `app.check_rate_limit` é chamada nas três RPCs do trabalhador — 20/5min por token e 60/5min por IP — mais `identity_max_attempts` (5). API pública tem `m2m.quota_counters`. O login do gestor depende do limite do próprio GoTrue |
 | **idempotência** | **PASS** (API) / **PARTIAL** (painel) | A API pública faz claim → domínio → COMPLETED numa transação, então "domínio gravado mas cliente sem resposta" é estruturalmente impossível. **As Server Actions do painel não são idempotentes**: duplo clique pode criar duas entregas. Ver P2 |
 | **audit trail** | **PASS** | Encadeado por hash por organização, append-only, com trigger de backstop, sem grant para papel nenhum — nem `service_role` |
-| **imutabilidade** | **PARTIAL → P1-1** | `audit.audit_events` e `evidence.evidence_versions` têm trigger contra UPDATE/DELETE. **`evidence.documents` não tem.** Ver P1-1 |
+| **imutabilidade** | **PASS** (corrigido nesta rodada) | As três tabelas agora têm trigger contra UPDATE/DELETE que recusa **até para o dono**. Ver §8 |
 | **PII / CPF** | **PASS** | Varredura de catálogo: só `cpf_hash` (bytea), `cpf_enc` (bytea) e `cpf_masked`. Nenhuma coluna em claro. A página pública `/verify` foi medida e não expõe nome nem CPF |
 | **biometria** | **N/A, por decisão** | AL2–AL4 não implementados e lançam explicitamente. O padrão é AL1 não biométrico, por leitura da NT 4/2026 da ANPD. Não há template biométrico em lugar nenhum do schema |
 | **backups / recovery** | **DESCONHECIDO → P1-2** | Não consigo ler o plano nem a configuração de PITR do projeto Supabase a partir daqui |
-| **observabilidade** | **FAIL → P1-3** | Seis pontos de log em toda a aplicação. Sem rastreamento de erro, sem alerta — exceto a checagem de atraso do runner de webhooks |
+| **observabilidade** | **PARTIAL** (era FAIL) | Captura estruturada com id de correlação e redação testada, ligada aos quatro caminhos críticos. **Falta o sino**: nada avisa um humano. Ver §8 e `docs/runbook-rollback.md` §7 |
 | **tratamento de erro** | **PASS** | `describeRpcError` traduz código do Postgres para pt-BR sem vazar nome de constraint ou schema; a API devolve 503 para erro de configuração e 500 opaco para o resto |
-| **secrets** | **PARTIAL → P1-5** | Nove variáveis obrigatórias, todas fora do Vault por decisão (o dump do banco é a ameaça realista). **Não existe procedimento escrito de custódia, escrow e rotação** |
+| **secrets** | **PARTIAL** (era FAIL de documentação) | `docs/runbook-secrets.md` documenta categorias, donos, rotação, revogação e resposta a comprometimento. **O escrow em si continua por fazer** — é um ato organizacional, não um documento |
 | **migrations** | **PASS** | 69 migrations aplicam do zero (medido hoje); disciplina append-only; o CI prova a aplicação a partir do nada a cada PR |
-| **rollback / recovery** | **PARTIAL → P1-6** | Não há migration de volta (append-only, por desenho) e o rollback da Vercel **não desfaz migration** |
+| **rollback / recovery** | **PARTIAL** (era sem procedimento) | `docs/runbook-rollback.md` escrito: aplicação, schema, dados, evidência, incidentes. **Nenhum dos três ensaios foi executado** (§8 do runbook) |
 
 ---
 
-## 3. Blockers P0/P1
+## 3. Blockers restantes
 
-Nenhum **P0**. Nada impede tecnicamente colocar um cliente e rodar o fluxo — isso foi executado hoje, inteiro.
+**P0: nenhum.**
 
-Os P1 abaixo são o que separa "funciona" de "posso responder por isso quando der problema".
+**P1: dois, e ambos são atos organizacionais, não código.**
 
-### P1-1 — `evidence.documents` sem trava de imutabilidade
-**O quê:** a tabela que liga o código de verificação à versão da evidência não tem o trigger contra UPDATE/DELETE que suas irmãs têm.
-**Impacto real:** repontar um `verification_code` para outra `evidence_version` faria o QR de um comprovante impresso verificar contra conteúdo diferente. Alcançável apenas por quem tem acesso de dono ao banco — mas essa é exatamente a camada que `evidence_versions` já fecha, e a assimetria não está documentada em lugar nenhum. É a alegação central do produto.
-**Correção:** uma migration com o mesmo trigger já usado em `evidence_versions`.
+### P1-2 — Backup e recuperação: não confirmados, e **não confirmáveis a partir daqui**
 
-### P1-2 — Backup e recuperação não confirmados
-**O quê:** ninguém confirmou plano do Supabase, retenção de backup ou PITR.
-**Impacto real:** a evidência de um cliente real passa a viver ali. Sem PITR, um `DELETE` errado ou um incidente do fornecedor é perda definitiva de prova pericial. Também não houve **teste de restauração** — backup não testado não é backup.
-**Correção:** confirmar o plano, ativar PITR, e restaurar uma vez para um projeto descartável, cronometrando.
+Tentei ler a configuração real. O servidor MCP do Supabase disponível nesta sessão está autenticado noutra organização (`nftljccaybipqmtbtati`, projeto "WeGest") e **não enxerga os projetos EPI** — `list_projects` devolve um único projeto que não é o `epi-dev`. Portanto:
 
-### P1-3 — Sem observabilidade
-**O quê:** seis pontos de log; nenhum rastreamento de erro; nenhum alerta.
-**Impacto real:** se o cliente-piloto encontrar um erro, ninguém fica sabendo. O produto acabou de encontrar cinco defeitos reais em produção **só porque alguém foi olhar** — em piloto não haverá quem olhe.
-**Correção:** rastreador de erro no app e nas rotas `/api/*`, mais alerta para: falha de Server Action, `5xx` na API, e outbox de webhook parado.
+- **Não sei** se há PITR ativo. **Não presumo.**
+- **Não sei** a retenção de backup do plano em uso.
+- **Nunca foi feita** uma restauração de teste.
 
-### P1-4 — Importação nunca exercitada ponta a ponta
-**O quê:** o caminho CSV/XLSX tem RPCs e suíte pgTAP, mas nenhuma execução ao vivo com arquivo real.
-**Impacto real:** é assim que um cliente de verdade carrega 200 funcionários. Se falhar no primeiro dia, o piloto começa cadastrando à mão.
-**Correção:** rodar um import real de ~50 linhas com CPFs válidos, incluindo linhas ruins, e conferir `import_runs`.
+Não executei restore algum: exigiria criar um projeto descartável numa organização a que não tenho acesso, e a instrução — correta — foi nunca arriscar `epi-dev` nem produção para provar restore.
 
-### P1-5 — Segredos sem custódia escrita
-**O quê:** nove segredos, dos quais dois são irrecuperáveis por natureza.
-**Impacto real:** perder `CPF_HASH_PEPPER` não apaga a evidência, mas **destrói para sempre** a capacidade de reconferir o CPF por trás de um hash histórico. Perder `WORKER_TOKEN_PEPPER` invalida todo link pendente. Hoje isso mora num `.env` e na Vercel, sem escrow.
-**Correção:** procedimento de uma página — quem detém a cópia, onde fica o escrow, o que se faz se o valor de produção se perder.
+**Impacto para o piloto:** a evidência pericial de um cliente real passa a viver ali. Sem PITR confirmado, um `DELETE` errado ou um incidente do fornecedor é perda definitiva de prova. Um backup nunca restaurado é uma hipótese, não um backup.
 
-### P1-6 — Sem estratégia escrita de rollback
-**O quê:** rollback da Vercel reverte o app, não o banco.
-**Impacto real:** uma migration ruim aplicada com um cliente ativo não tem caminho de volta ensaiado. As migrations são append-only por decisão, o que torna o **forward fix** a única saída — mas isso precisa estar escrito antes de ser preciso, não durante.
-**Correção:** meia página: como se detecta, quem decide, forward-fix como padrão, e quando se recorre ao PITR do P1-2.
+**Para fechar:** Dashboard Supabase → projeto → Database → Backups. Registrar plano, PITR (ativo/inativo, janela) e retenção. Depois restaurar uma vez para um projeto **novo e descartável**, cronometrando. Procedimento em `docs/runbook-rollback.md` §4.
+
+### P1-5b — Escrow dos segredos irrecuperáveis
+
+`docs/runbook-secrets.md` está escrito: categorias, donos, consumidores, rotação, revogação e resposta a comprometimento. O que **não** está feito é o próprio escrow.
+
+Cinco segredos são irrecuperáveis por natureza e hoje existem em dois lugares — a Vercel e o `.env` de quem os gerou. Perder `CPF_HASH_PEPPER` não apaga a evidência, mas **destrói para sempre** a capacidade de reconferir qual CPF está por trás de um hash histórico; nenhum backup do banco recupera isso, porque o valor nunca esteve lá.
+
+**Para fechar:** `docs/runbook-secrets.md` §7 — escolher o cofre, depositar os cinco, nomear duas pessoas, datar, e testar a leitura por quem não depositou.
 
 ---
 
 ## 4. Pode esperar o pós-piloto
 
-- **Integração WOTY.** Bloqueada até haver credenciais reais. A arquitetura de adaptador existe e está vazia; **nenhum mock é apresentado como integração pronta**. Não bloqueia o piloto: o cliente entra por cadastro manual ou importação.
-- **`partner_relationships`.** Não construída. Não bloqueia: operar **uma empresa diretamente** funciona hoje, e a organização `PARTNER` com N empresas já é suportada e testada.
-- **Idempotência das Server Actions do painel** (duplo clique cria entrega duplicada).
-- **Concessão de break-glass com escopo de empresa** — existe e é testada no banco, mas o console só emite escopo organizacional.
-- **Envio de e-mail transacional** (convite e recuperação de senha são links copiados à mão hoje).
-- **AL2–AL4 / biometria**, PWA offline, exportação de ficha em PDF além do que já existe.
-- **Testes automatizados das telas novas** das fases G e H no CI (hoje são scripts manuais, deliberadamente fora do CI para não pôr credenciais reais lá).
+- **Alerta ativo.** A captura existe; o sino não. Todas as opções exigem plano pago ou conta externa, então a decisão ficou aberta com os custos na mesa — `docs/runbook-rollback.md` §7. **Nada foi integrado.**
+- **Histórico de importações.** `app.import_runs` registra cada execução, mas nada expõe uma lista: `api.import_run_status` recebe o id da execução, e esse id só existe dentro da sessão do assistente. O que o cliente consegue consultar depois é a trilha de auditoria (`EMPLOYEES_IMPORTED`), que foi medida. Uma tela de histórico é conveniência, não bloqueio.
+- **Integração WOTY.** Bloqueada até haver credenciais reais. O adaptador existe e está vazio; **nenhum mock é apresentado como integração pronta**. Não bloqueia: o cliente entra por cadastro manual ou pela importação, agora medida.
+- `partner_relationships`. Não construída. Operar **uma empresa diretamente** funciona hoje.
+- **Idempotência das Server Actions do painel** (duplo clique pode criar entrega duplicada).
+- **Concessão de break-glass com escopo de empresa** — existe e é testada no banco; o console só emite escopo organizacional.
+- **Envio de e-mail transacional** (convite e recuperação de senha são links copiados à mão).
+- **PWA offline**, exportação de ficha em PDF além do que já existe.
+- **Testes das telas das fases G e H no CI** — hoje são scripts manuais, deliberadamente fora do CI para não pôr credenciais reais lá.
 
 ---
 
 ## 5. Checklist operacional — onboarding do primeiro cliente
 
-1. [ ] Criar a conta do gestor e concluir `onboard_organization` (razão social + CNPJ da empresa).
-2. [ ] **Ligar os flags da organização** em `/settings` — `compliance_enabled` no mínimo; `inventory_enabled` e `role_matrix_enabled` conforme o combinado. **Nascem desligados.**
+1. [ ] Criar a conta do gestor e concluir `onboard_organization` (razão social + CNPJ).
+2. [ ] **Ligar os flags da organização** em `/settings` — `compliance_enabled` no mínimo. **Nascem desligados.**
 3. [ ] Conferir `early_replacement_policy` e `replacement_alert_days` com o cliente.
-4. [ ] Convidar os usuários da empresa em `/settings/team`, com escopo e papel corretos. **O Selo não envia e-mail**: o link sai uma única vez na tela e é repassado à mão.
-5. [ ] Cadastrar cargos e locais antes dos funcionários (o vínculo é opcional, mas retroativo dá trabalho).
-6. [ ] Importar funcionários (CSV/XLSX) — validar o `import_run` antes de seguir. Ver P1-4.
-7. [ ] Cadastrar o catálogo de EPIs com CA e vida útil padrão; variantes onde houver numeração.
-8. [ ] Emitir **uma entrega de teste** para um funcionário real e percorrer o link do trabalhador do começo ao fim, no celular dele.
+4. [ ] Convidar os usuários em `/settings/team`. **O Selo não envia e-mail**: o link sai uma vez na tela e é repassado à mão.
+5. [ ] **Cadastrar Cargos e Locais ANTES de importar.** A importação recusa uma linha cujo Cargo não exista no catálogo — de propósito, nada é criado por conta do cliente. Medido: com os Cargos ausentes, 0 de 201 linhas entram; com eles cadastrados, 170 entram.
+6. [ ] Importar funcionários. Conferir na tela: linhas lidas, linhas recusadas com motivo por linha, e quantas serão criadas. Baixar o relatório de erros se houver.
+7. [ ] Cadastrar o catálogo de EPIs com CA e vida útil padrão.
+8. [ ] Emitir **uma entrega de teste** para um funcionário real e percorrer o link no celular dele.
 9. [ ] Verificar o comprovante em `/verify/<código>` num aparelho sem sessão.
 10. [ ] Mostrar ao cliente `/settings/acesso-do-suporte` e explicar o que ele vê ali.
-11. [ ] Confirmar com o cliente o número de latência de webhook (minutos, não segundos — o agendador do GitHub Actions), se ele for usar webhooks.
-12. [ ] Registrar quem, do lado do cliente, é o último `ORG_ADMIN` — e garantir que exista um segundo.
+11. [ ] Se for usar webhooks, confirmar a latência (minutos, não segundos — agendador do GitHub Actions).
+12. [ ] Garantir que exista um **segundo** `ORG_ADMIN`.
 
 ---
 
@@ -165,26 +161,108 @@ Os P1 abaixo são o que separa "funciona" de "posso responder por isso quando de
 
 1. [ ] Confirmar qual projeto Supabase é produção (`yqbhdpennqcywxatvhwr` vs `zowuandkuubskaqlpfka` **segue não resolvido** em `docs/architecture.md` §20).
 2. [ ] PITR ativo e **uma restauração testada** (P1-2).
-3. [ ] Os nove segredos definidos em produção, distintos dos de dev, com escrow escrito (P1-5).
-4. [ ] Schemas expostos ao PostgREST conferidos no dashboard: `graphql_public, api, worker, m2m_rpc, ops_rpc` — é ajuste de dashboard, invisível às migrations.
-5. [ ] `scripts/security-audit.mjs` rodando limpo (hoje: 1 violação, P1-1).
-6. [ ] Rastreamento de erro e alertas ligados (P1-3).
-7. [ ] Procedimento de rollback escrito (P1-6).
-8. [ ] Nenhuma conta de teste `e2e-*@example.com` no projeto de produção.
-9. [ ] Nenhum `platform_admin` semeado em produção além dos nomeados; lembrar que o primeiro é sempre `insert` manual, por desenho.
-10. [ ] Confirmar retenção de log e que o log da Vercel não recebe PII.
-11. [ ] Revisar as pendências jurídicas de `docs/architecture.md` §20 que **bloqueiam alegação comercial**, não código: nível de garantia aceito em juízo, base legal LGPD, necessidade de ICP-Brasil.
+3. [ ] Os nove segredos definidos em produção, distintos dos de dev, com escrow feito (P1-5b).
+4. [ ] `DEV_PROBE_KEY` e `RESEND_API_KEY` **não** definidos — estão em `.env.example` e não têm consumidor no código.
+5. [ ] Schemas expostos ao PostgREST conferidos no dashboard: `graphql_public, api, worker, m2m_rpc, ops_rpc`.
+6. [ ] `node scripts/security-audit.mjs` sem violações.
+7. [ ] Decidir o destino de alerta (`docs/runbook-rollback.md` §7).
+8. [ ] Nenhuma conta `e2e-*@example.com` no projeto de produção.
+9. [ ] Nenhum `platform_admin` semeado além dos nomeados. O primeiro é sempre `insert` manual, por desenho.
+10. [ ] Confirmar que o log da Vercel não recebe PII — a redação é testada em `src/lib/observability/report.test.ts`.
+11. [ ] Revisar as pendências jurídicas de `docs/architecture.md` §20, que bloqueiam **alegação comercial**, não código.
 
 ---
 
-## 7. Recomendação
+## 7. Identidade: AL1 versus reconhecimento facial
+
+O usuário pediu que isto ficasse separado, e é a separação mais importante do documento.
+
+### A) Prontidão para piloto usando AL1 — **PRONTO**
+
+O que foi medido ponta a ponta: link individual e opaco (256 bits de CSPRNG, HMAC com pepper, o token cru nunca chega ao Postgres), desafio de conhecimento pelos 3 últimos dígitos do CPF, assinatura desenhada pelo trabalhador, e o conjunto selado como evidência canônica com hash. Rate limiting nas três RPCs do trabalhador (20/5min por token, 60/5min por IP) e teto de tentativas de identidade (`identity_max_attempts` = 5).
+
+Isto é o `AL1_LINK_KNOWLEDGE` da arquitetura, e a escolha de fazer dele o padrão **não** foi conveniência: `docs/architecture.md` §9 registra a leitura da NT 4/2026 da ANPD, que suspendeu um sistema de reconhecimento facial pelo raciocínio de que biometria não é "indispensável" quando a própria norma oferece alternativa não biométrica — e a NR-6 6.5.1(d) oferece.
+
+### B) Prontidão para comercializar reconhecimento facial / liveness — **NÃO PRONTO. NADA FOI IMPLEMENTADO.**
+
+Isto não é "parcialmente pronto", "preparado" ou "arquitetado". É **inexistente**:
+
+- `AL2` a `AL4` **não têm adaptador**. O registry lança explicitamente para esses níveis.
+- `app.identity_profiles` existe como tabela vazia — ponteiro para provedor, **nunca** um template biométrico.
+- **Nenhum fornecedor foi contratado, integrado ou testado.** A pesquisa da FASE 4 avaliou AWS Rekognition Face Liveness, Azure e Serpro via revenda; **nenhuma decisão foi tomada** e nenhuma credencial existe.
+- A varredura de catálogo confirma: nenhuma coluna, tabela ou payload biométrico em lugar nenhum do schema.
+
+**O que existe é a abstração** (`IdentityVerificationProvider`, nível de garantia como dado por organização em vez de fixo no código). Isso significa que adicionar um fornecedor não exige migration de dados — não significa que exista qualquer capacidade facial.
+
+**Consequência comercial, dita sem rodeio:** vender "reconhecimento facial" ou "prova de vida" hoje seria vender algo que não existe. Antes de qualquer alegação nesse sentido são necessários: escolha e contrato de fornecedor, implementação do adaptador, validação real com pessoas reais, DPIA/RIPD (a ANPD tratou a ausência disso como parte da violação no caso citado), e base legal LGPD para o ramo biométrico definida — art. 11, II, "g" versus consentimento, questão em aberto em `docs/architecture.md` §20.
+
+**Para o piloto isso não é bloqueio**, desde que o piloto seja vendido como o que é: confirmação por link com desafio de conhecimento e assinatura, com evidência selada e verificável.
+
+---
+
+## 8. O que mudou nesta rodada
+
+### 8.1 P1-1 — imutabilidade de `evidence.documents` — **FECHADO**
+
+Migration `20260909100000_evidence_documents_immutability.sql`: trigger `BEFORE UPDATE OR DELETE` usando a mesma `audit.forbid_mutation()` que as tabelas irmãs já usavam, mais `revoke` explícito incluindo `service_role` e `public`.
+
+**Nenhum fluxo legítimo foi afetado**, e isso foi verificado antes de escrever: há exatamente um escritor da tabela em todo o código — `app.seal_evidence`, chamada só de dentro da transação de `worker.finish_confirmation` — e ela só faz `INSERT`. Não existe `UPDATE` nem `DELETE` dessa tabela em migration nenhuma nem em caminho nenhum da aplicação.
+
+Suíte `250_evidence_document_immutability.sql`, 14 asserções, tentando exatamente o ataque:
+- repontar `evidence_version_id` de um código já emitido → recusado (`42501`);
+- reescrever o `verification_code` → recusado;
+- apagar o documento → recusado;
+- o mesmo pela chave primária em vez do código → recusado;
+- **e depois de todas as tentativas, o comprovante ainda resolve para a evidência original** — `/verify/<code>` devolve o payload real, não o forjado;
+- as três tentativas como `authenticated` → recusadas, inclusive emitir um documento novo;
+- a evidência selada em si continua imutável;
+- o trigger está no catálogo, então uma migration futura que o remova quebra a suíte.
+
+`scripts/security-audit.mjs`: **sem violações** (era 1).
+
+### 8.2 P1-2 — backup/PITR — **NÃO FECHADO**, ver §3
+
+### 8.3 P1-3 — observabilidade — **PARCIALMENTE FECHADO**
+
+`src/lib/observability/report.ts`: captura centralizada, um evento JSON por falha, id de correlação (prefere o id de requisição da plataforma para que as duas linhas possam ser cruzadas), operação de uma lista fechada, e **redação obrigatória**.
+
+A redação é a parte que interessa e é testada em 14 asserções. **Ela pegou um vazamento meu:** a primeira versão aceitava `"961.810.907-87"` como "sinal" — um CPF, direto para a linha de log. A regra passou a exigir letra inicial, proibir ponto e limitar o tamanho.
+
+Ligado a: falha ao selar evidência (`src/app/e/s/[id]/actions.ts`), commit de importação, runner de webhooks, manutenção.
+
+**O que falta:** o sino. Ver §4 e `docs/runbook-rollback.md` §7.
+
+### 8.4 Importação — **MEDIDA, e encontrou um defeito real**
+
+`scripts/e2e-import.mjs`, **12/12**, com 201 linhas sintéticas geradas na hora (CPFs com dígitos verificadores reais, CSPRNG; nenhum dado de pessoa real): 170 limpas, 15 duplicadas dentro do arquivo, 15 malformadas em três formas distintas (dígito verificador errado, nome vazio, e-mail inválido), e 1 colidindo com alguém já existente no tenant.
+
+Medido: o arquivo é lido no navegador e a tela **diz que nada foi enviado**; 31 linhas são recusadas antes de qualquer envio, **cada uma nomeando a linha e o motivo** ("Linha 172 — CPF duplicado (já aparece na linha 2)"); a tela informa 170 a criar; o commit cria exatamente 170; nenhuma linha malformada ou duplicada vira funcionário; o CPF importado sai mascarado; nada é visível de outro tenant; e a importação fica na trilha de auditoria do próprio tenant.
+
+**O defeito:** um Cargo que não existe no catálogo faz a importação recusar — correto, nada é criado por conta do cliente. Mas `commitError` e `resolutionErrors` só eram **renderizados no passo 3**, e o retorno antecipado os definia e voltava **sem mudar de passo**. O operador clicava em "Confirmar importação" e **nada acontecia na tela**: sem erro, sem progresso, sem explicação. Num piloto, o cliente conclui que o produto está quebrado.
+
+Corrigido levando os dois retornos ao passo que já sabia se explicar, marcado como parcial para que a tela nunca possa ser lida como sucesso. Não é funcionalidade nova — é tornar alcançável uma mensagem que já existia.
+
+### 8.5 P1-5 e P1-6 — runbooks — **ESCRITOS**
+
+`docs/runbook-secrets.md` e `docs/runbook-rollback.md`. Nenhum valor real de segredo em nenhum dos dois. Ambos terminam com o que **não** foi ensaiado, porque um procedimento nunca executado é uma hipótese.
+
+---
+
+## 9. Recomendação final
 
 # CONDITIONAL GO
 
-**O produto faz o que promete.** O fluxo inteiro — onboarding, usuários, funcionários, catálogo, entrega individual, entrega em massa, link do trabalhador, identidade, confirmação, evidência selada, comprovante, verificação pública, acompanhamento, troca, compliance, isolamento e revogação — foi executado hoje, ponta a ponta, contra o projeto real, com o percurso do trabalhador num navegador de verdade. **18 de 18.** O isolamento entre tenants e a superfície `anon` foram verificados no catálogo, não presumidos.
+**Mudou o suficiente para justificar a mudança de tom, e não o suficiente para um GO limpo.**
 
-**A condição não é sobre funcionalidade, é sobre o que acontece quando algo der errado.** Um piloto com empresa real precisa de três coisas que hoje não existem: saber que quebrou (P1-3), poder voltar atrás (P1-2, P1-6) e não perder para sempre um segredo que não se recupera (P1-5). Some-se a trava que falta na tabela que sustenta a alegação central do produto (P1-1) e o caminho pelo qual o cliente realmente carrega os dados dele (P1-4).
+Fechado desde a auditoria anterior: a trava de imutabilidade que faltava na tabela que sustenta a alegação central do produto, com prova de que um comprovante emitido não pode ser silenciosamente reapontado; a importação, agora medida com 201 linhas e um defeito real corrigido no caminho; a captura de exceções com redação que já provou pegar um vazamento; e os dois runbooks.
 
-**Mínimo para o GO:** P1-1 (uma migration), P1-2 (confirmar e testar restauração), P1-3 (erro + alerta), P1-5 (uma página escrita). P1-4 e P1-6 podem correr em paralelo à primeira semana do piloto **se** o cliente entrar com poucos funcionários e o cadastro for manual.
+**Restam dois, e nenhum é código:**
 
-**O que eu não afirmo:** que já rodou com volume real, que a importação funciona ao vivo, que o backup restaura, ou que alguém vai perceber uma falha em produção. Nada disso foi medido, e as três primeiras podem ser medidas esta semana.
+1. **Backup/PITR não confirmado e nunca restaurado (P1-2).** Não consigo verificar daqui — o acesso disponível nesta sessão é de outra organização. É uma consulta de dashboard mais um teste de restauração num projeto descartável.
+2. **Escrow dos cinco segredos irrecuperáveis (P1-5b).** Está tudo documentado; falta depositar.
+
+**Vira GO quando esses dois estiverem feitos.** Ambos são horas, não semanas, e nenhum depende de engenharia.
+
+**Sobre alerta:** a captura existe, o sino não, e todas as opções custam dinheiro ou expõem dado a terceiro — a decisão ficou aberta com os custos na mesa, como pedido. Um piloto acompanhado de perto por uma pessoa que consulta os logs sobrevive sem isso; um piloto desacompanhado, não.
+
+**O que eu continuo não afirmando:** que já rodou com volume de produção sustentado, que o backup restaura, que alguém será avisado quando algo falhar, ou que existe qualquer capacidade de reconhecimento facial. Os três primeiros são mensuráveis esta semana. O quarto não existe e não deve ser vendido.
