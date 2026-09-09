@@ -411,7 +411,7 @@ Um terceiro achado foi de desenho, não bug: o bloco `org_wide_grant_required` e
 |---|---|
 | `typecheck` / `lint` / 218 testes unitários / build | verde local; `/plataforma`, `/plataforma/[organizationId]` e `/settings/acesso-do-suporte` presentes |
 | `db:check:local` (PGlite) | a migration aplica de zero |
-| pgTAP `240_platform_break_glass.sql` (32 asserções) | **escrita, ainda não executada** — exige Postgres real |
+| pgTAP `240_platform_break_glass.sql` (32 asserções) | **32/32 PASS** no CI, na primeira execução |
 | E2E ao vivo / UI | **não** |
 
 As duas últimas linhas mudam quando houver evidência, não antes.
