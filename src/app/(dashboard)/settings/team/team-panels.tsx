@@ -109,7 +109,7 @@ export function InvitePanel({
           O acesso vem sempre de um convite aceito — não existe cadastrar outra pessoa por ela.
           Quem aceita entra exatamente no perfil e no escopo definidos aqui.
         </p>
-        <form action={inviteAction} className="flex flex-col gap-3">
+        <form action={inviteAction} className="flex max-w-md flex-col gap-3">
           <input type="hidden" name="organizationId" value={organizationId} />
           <label className="flex flex-col gap-1 text-[12.5px] font-bold">
             E-mail

@@ -71,7 +71,13 @@ export default async function TeamPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2 xl:items-start">
+      {/* Stacked, not the two-column grid /settings/integrations uses. Both tables here
+          carry five or six columns -- person, scope, role, dates, action -- and at half the
+          content width they overflowed their panel: the action column, with the only remove
+          and cancel buttons on the page, sat outside the visible area behind a horizontal
+          scrollbar nobody would think to look for. Caught by looking at a screenshot; every
+          text assertion passed, because innerText contains clipped text just the same. */}
+      <div className="flex max-w-5xl flex-col gap-6">
         <section className="flex flex-col gap-3.5">
           <MembersPanel members={members} grantableRoles={grantableRoles} currentUserId={user.id} />
         </section>

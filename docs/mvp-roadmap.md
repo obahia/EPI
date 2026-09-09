@@ -364,3 +364,15 @@ Suíte completa verde: 24 arquivos pgTAP, 373 asserções, incluindo as 26 da Fa
 Parar no CI verde teria deixado a exposição hospedada sem evidência nenhuma. Parar no E2E ao vivo teria deixado a escalada de privilégio sem prova sistemática — o E2E cobre um caminho por vez; a suíte cobre as sete recusas de `auth_ctx.can_grant_role` de uma vez.
 
 **Fora do escopo, declarado e não silenciado:** acesso entre organizações (`partner_relationships`), *break-glass* de plataforma (as tabelas da FASE 0 continuam sem código), envio de e-mail de convite, e teste automatizado das páginas `/settings/team` e `/convite/<token>` — o E2E dirige as RPCs, não a UI.
+
+### FASE G — verificação da UI (`scripts/e2e-phase-g-ui.mjs`, 18/18 PASS)
+
+O buraco declarado no encerramento — `/settings/team` e `/convite/<token>` nunca terem sido carregadas — está fechado. Navegador real, build de produção, banco `epi-dev` real, duas identidades em contextos de browser separados, login pelo formulário de verdade (nenhuma sessão injetada).
+
+Além do caminho feliz, prova o que só o navegador podia provar: o link que o painel **renderiza** é o link que funciona; carregar `/convite/<token>` **não** consome o convite (aceitar é POST — um prefetch ou scanner não queima o convite); quem não está logado cai numa tela de onde consegue agir, e o `?next=` leva de volta ao convite depois do login em vez de despejar no dashboard; a página não revela nada do convite antes do aceite; e a linha **Equipe** aparece na sidebar do admin e some para o `SST_OPERATOR`.
+
+**Fora do CI, deliberadamente.** O job Playwright roda sem `.env` e sem segredo nenhum (achado TST-01), o que é exatamente o caso que vale provar lá. Autenticar um navegador exigiria pôr credenciais reais do projeto no CI e desfazer essa decisão por causa de uma spec. Então isto vive ao lado do `scripts/e2e-phase-g.mjs` como ferramenta de verificação manual.
+
+**Um bug real, achado só por olhar a captura.** As duas tabelas (5 e 6 colunas) estavam num grid de duas colunas e transbordavam o painel: a coluna **Ação** — com os únicos botões de remover e cancelar da página — ficava fora da área visível, atrás de um scroll horizontal que ninguém procuraria. Todas as asserções de texto passavam, porque `innerText` contém o texto cortado igual. Corrigido empilhando os painéis.
+
+**E uma lição sobre medir antes de concluir.** Uma execução acusou "revogar não atualiza a lista", e eu diagnostiquei `revalidatePath` não atualizando o router do cliente, com base no guia da versão. Estava errado: a causa era o meu locator, que casava `<tr>` da tabela de **Convites** — onde o mesmo e-mail aparece e nunca some. Com o locator restrito ao painel de membros, passa com `revalidatePath` sozinho; medido de novo com e sem `refresh()`, e o `refresh()` não muda nada. O código ficou como estava. Duas execuções anteriores também mentiram por outro motivo: rebuild com o servidor rodando troca o `.next` embaixo do processo, a página vem sem CSS nem JS, e um formulário sem JS vira POST com navegação completa — o caso que esconde justamente esse tipo de bug.
