@@ -3,6 +3,7 @@
 **Data:** 2026-09-09. **Etapa:** I-N, executada **antes** dos spikes por decisão minha.
 **Veredito:** **BLOQUEADO para uso comercial** na combinação escolhida.
 **Investigação 2 (2026-09-09):** busca por qualquer stack R$0 comercialmente limpa — **NO-GO**. Ver §9 em diante.
+**Investigação 3 (2026-09-09):** YuNet + SFace + liveness por challenge temporal — **CONDITIONAL GO FOR SPIKE**, e correção de método da Investigação 2. Ver §16 em diante.
 
 A instrução da fase foi explícita: *"Não assumir que licença do wrapper cobre automaticamente os pesos/modelos. Qualquer ambiguidade de licença comercial deve virar blocker."* Este documento é o resultado de aplicar essa regra — e ela produziu um blocker antes de qualquer container subir.
 
@@ -201,3 +202,166 @@ O AL1 do produto permanece intocado e continua sendo o que `docs/pilot-readiness
 - CelebA-Spoof — https://github.com/ZhangYuanhan-AI/CelebA-Spoof
 - Silent-Face-Anti-Spoofing — https://github.com/minivision-ai/Silent-Face-Anti-Spoofing
 - InsightFace, licenciamento comercial — https://www.insightface.ai/
+
+---
+
+# Investigação 3 — YuNet + SFace + liveness por challenge temporal
+
+**Data:** 2026-09-09. **Recomendação: CONDITIONAL GO FOR SPIKE.**
+
+## 16. Correção de método na investigação anterior
+
+Duas coisas que fiz errado na Investigação 2, e que mudam conclusões:
+
+**16.1 Confundi incerteza de proveniência com ausência de licença.** Classifiquei SFace e `face-reidentification-retail-0095` como BLOQUEADOS porque o dataset de treino não estava documentado. Isso é errado. São três coisas distintas:
+
+| | Significa | Classificação |
+|---|---|---|
+| **Licença explícita dos pesos** | O detentor concede direitos sobre o artefato | CLEAN |
+| **Ausência de licença** | Ninguém concedeu nada; usar é presumir permissão | BLOCKED |
+| **Incerteza de proveniência** | Há concessão sobre o artefato, mas não se sabe a origem do treino | UNCERTAIN — risco residual, não proibição |
+
+BLOCKED deve ser reservado a restrição **incompatível e explícita**, como a da InsightFace. Aplico essa régua daqui em diante.
+
+**16.2 Inferi o dataset de treino do YuNet a partir de uma métrica de validação.** O README publica AP no *WIDER FACE validation set*, e eu tratei isso como prova de treino. Não é. Fui à fonte certa — o repositório de treinamento do próprio autor — e ali está: *"YuNet face detection training on WIDER Face"*. A conclusão anterior estava certa; o caminho estava errado, e um caminho errado que acerta uma vez erra na seguinte.
+
+## 17. SFace — verificação 1:1
+
+| Camada | Achado | Fonte |
+|---|---|---|
+| Licença do diretório | *"All files in this directory are licensed under Apache 2.0 License"* | README do modelo |
+| Arquivo LICENSE | Presente. Texto Apache-2.0 padrão, **sem linha de copyright nomeando detentor**, sem cláusula adicional | `models/face_recognition_sface/LICENSE` |
+| Abrangência sobre o `.onnx` | **Sim.** "All files in this directory" inclui os pesos | README |
+| Proveniência | SFace é contribuição de **Yaoyao Zhong**; conversão para ONNX por Chengrui Wang | README |
+| Dataset de treino | **Não documentado** | README |
+| Cláusula externa restritiva | **Nenhuma encontrada** | — |
+| Benchmark | 99,40% (bloco-quantizado 99,42%, int8 99,32%) | README |
+
+**Classificação: CLEAN na camada de licença, UNCERTAIN na proveniência.**
+
+O distribuidor concede Apache-2.0 sobre todos os arquivos do diretório, e isso inclui os pesos. Não há restrição externa conhecida. A fraqueza é o LICENSE ser template sem detentor nomeado — a concessão vem do repositório da OpenCV, organização identificável e com responsabilidade reputacional, o que é substancialmente melhor que um publicador anônimo, mas menos forte que uma linha de copyright explícita.
+
+## 18. YuNet — detecção
+
+| Camada | Achado | Fonte |
+|---|---|---|
+| Arquivo LICENSE | MIT, **com detentor nomeado: `Copyright (c) 2020 Shiqi Yu <shiqi.yu@gmail.com>`**, sem cláusula adicional | `models/face_detection_yunet/LICENSE` |
+| Licença do diretório | *"All files in this directory are licensed under MIT License"* | README |
+| Abrangência sobre o `.onnx` | **Sim** | README |
+| Proveniência | Shiqi Yu e equipe (Wu, Peng, Yu) | README |
+| **Dataset de treino** | **WIDER Face**, confirmado no repositório de treinamento do autor (`ShiqiYu/libfacedetection.train`, BSD-3-Clause). Anotações `labelv2` vindas do SCRFD | Fonte primária |
+| Licença do dataset | **CC BY-NC-ND 4.0** (card do dataset no Hugging Face) | Secundária, mas card oficial do CUHK-CSE |
+| Benchmark | WIDER AP 0,884 / 0,866 / 0,750 | README |
+
+**Classificação: UNCERTAIN.** É a concessão mais forte das três — MIT do **próprio autor do modelo, nomeado**. E existe tensão real: o dataset de treino é não-comercial e sem derivados.
+
+A questão jurídica de fundo — *um modelo treinado é obra derivada do dataset?* — **não está pacificada** e varia por jurisdição. Não me cabe resolvê-la. O que registro é o que se sabe: quem detém direitos sobre o artefato concedeu MIT; quem detém direitos sobre as imagens de treino proibiu uso comercial de derivados; e as duas afirmações coexistem sem que ninguém as tenha conciliado publicamente.
+
+Não é BLOCKED pela régua da §16: não há restrição explícita sobre o artefato. É risco residual real, a ser aceito conscientemente ou eliminado trocando o detector.
+
+## 19. MediaPipe Face Landmarker
+
+| Camada | Achado | Fonte |
+|---|---|---|
+| Runtime / código | Apache-2.0 | repositório `google-ai-edge/mediapipe` |
+| Conteúdo da documentação | CC BY 4.0; exemplos de código Apache-2.0 | página oficial |
+| **Model bundle (`.task`)** | **Nenhuma declaração de licença encontrada** na página oficial nem no README do repositório | fonte primária |
+| Conteúdo do bundle | BlazeFace (detecção, curto alcance) + FaceMesh-V2 (478 landmarks 3D) + Blendshape V2 (52 scores) | página oficial |
+| Model cards | Existem para os três, publicados em `storage.googleapis.com` | página oficial |
+| Restrição explícita | **Nenhuma encontrada** | — |
+| Issues oficiais | **#2595** ("Can the pretrained models be used for commercial purposes?") e **#2709** ("Mediapipe Commercial Use - License info Display") — perguntam exatamente isto e **não têm resposta de mantenedor** | fonte primária |
+
+**Classificação: UNCERTAIN.** Você previu isto com precisão: a licença da página não é a licença do bundle. O repositório é Apache-2.0 e não existe nenhuma cláusula restritiva em lugar nenhum — mas também não localizei concessão explícita sobre os arquivos de modelo, que são hospedados fora do repositório.
+
+O fato de a pergunta ter sido feita publicamente **duas vezes e não respondida** é evidência, e ela corta para os dois lados: não há proibição, e não há confirmação.
+
+## 20. Liveness por challenge temporal — avaliação técnica
+
+A proposta é substituir a CNN anti-spoof por um desafio ativo: o servidor sorteia uma sequência curta e de uso único (olhar em frente, virar à esquerda, virar à direita, piscar, aproximar), e a resposta é avaliada ao longo dos frames.
+
+**Isto evita inteiramente o blocker do CelebA-Spoof**, porque não há modelo anti-spoof treinado — há geometria de landmarks ao longo do tempo. É a decisão mais inteligente desta proposta.
+
+### 20.1 O ponto que decide a viabilidade
+
+**A avaliação tem de acontecer no servidor.** Se o navegador roda o MediaPipe e envia `liveness=true`, qualquer pessoa com o console aberto contorna em trinta segundos. Isso não é hipótese — é o modo de falha normal de liveness client-side.
+
+Duas formas de fazer certo:
+
+- **(A) Servidor recebe os frames** e roda a extração de landmarks do lado dele. O navegador pode rodar MediaPipe também, mas só para orientar o usuário em tempo real; a decisão é do servidor, sobre os mesmos bytes que ele guardou o hash.
+- **(B) Servidor recebe a série temporal de landmarks assinada.** Mais barato, e **insuficiente**: uma série temporal plausível é fácil de sintetizar sem câmera nenhuma.
+
+**Só (A) é defensável.** Isso muda a arquitetura que você desenhou: o MediaPipe não pode viver só no browser. E tem consequência de privacidade — frames chegam ao servidor, ainda que possam ser descartados após a decisão, guardando apenas o `image_sha256` que a tabela `app.identity_verifications` já prevê.
+
+### 20.2 O que este mecanismo bloqueia
+
+| Ataque | Resultado | Por quê |
+|---|---|---|
+| Foto impressa | **Bloqueado** | Não pisca, não gira, sem paralaxe 3D |
+| Foto exibida em tela de celular | **Bloqueado** | Idem |
+| Screenshot | **Bloqueado** | Idem |
+| Vídeo gravado antes, genérico | **Bloqueado** na prática | A sequência sorteada não coincide com o que o vídeo faz, na janela curta |
+| Replay da mesma sessão | **Bloqueado** | Nonce de uso único, ligado à sessão e expirando rápido |
+| Challenge conhecido antes | **Bloqueado** | Gerado no servidor após o início da sessão, TTL curto |
+| Reutilização do resultado | **Bloqueado** | Resultado ligado ao `confirmation_request`, não reaproveitável |
+| Manipulação de JS | **Bloqueado apenas na variante (A)** | Na (B), trivialmente contornável |
+
+### 20.3 O que este mecanismo NÃO bloqueia
+
+| Ataque | Resultado | Por quê |
+|---|---|---|
+| **Deepfake em tempo real** | **Não bloqueado** | Um modelo de puppeteering executa qualquer challenge pedido, em tempo real |
+| **Vídeo montado com os movimentos esperados** | **Parcialmente mitigado** | Atacante que conheça o espaço de challenges pode pré-gravar cada primitiva e emendar. Mitigam: ordem aleatória, janela curta, exigência de continuidade temporal — não eliminam |
+| **Substituição do frame enviado** | **Parcialmente mitigado** | Mitiga: o mesmo frame que passou no liveness ser o usado no face match, com hash registrado. Não impede injeção de câmera virtual |
+| **Câmera virtual / injeção de stream** | **Não bloqueado** | Software de câmera virtual alimenta qualquer conteúdo; do lado do servidor é indistinguível de uma câmera real |
+
+### 20.4 Classificação honesta
+
+`ACTIVE_LIVENESS_BASIC` é o rótulo certo. **Não** é liveness certificado, **não** é iBeta, **não** resiste a adversário determinado com deepfake ou câmera virtual.
+
+Para o contexto real — um trabalhador confirmando recebimento de EPI, onde o incentivo de fraude é baixo e o fraudador provável é o próprio colega com o celular na mão — bloquear foto impressa, tela e replay é um salto de segurança relevante sobre o AL1 atual. Vender isso como "biometria bancária" seria falso; vender como "verificação facial com prova de vida por desafio" é exato.
+
+## 21. Riscos jurídicos residuais
+
+1. **YuNet / WIDER Face.** O maior. Concessão MIT do autor nomeado versus dataset CC BY-NC-ND. Eliminável trocando o detector.
+2. **SFace sem proveniência documentada.** Concessão Apache-2.0 explícita, origem do treino desconhecida. Se o treino vier de dataset não-comercial, reaparece a mesma tensão do item 1 — sem que ninguém consiga hoje afirmar que vem.
+3. **Model bundle do MediaPipe sem concessão localizada.** Sem restrição, sem confirmação, e duas perguntas oficiais sem resposta.
+4. **Nenhum dos três foi revisto por advogado.** Isto é levantamento técnico de licenças, não parecer jurídico. A decisão de aceitar os riscos 1–3 é de negócio.
+
+## 22. Ações que reduzem o risco, e custam quase nada
+
+1. **Issue em `opencv/opencv_zoo`** perguntando qual dataset treinou os pesos publicados do SFace. Resolve o risco 2 nos dois sentidos.
+2. **Issue ou e-mail a Shiqi Yu** perguntando se a concessão MIT se destina a cobrir uso comercial dos pesos, sabendo ele que o treino usou WIDER Face. Uma resposta escrita do detentor muda muito a posição.
+3. **Comentar nas issues #2595/#2709** do MediaPipe pedindo declaração sobre os model bundles. Já perguntado duas vezes sem resposta, então a expectativa deve ser baixa.
+4. **Investigar detector alternativo** com proveniência limpa, que eliminaria o risco 1 sem tocar no resto da arquitetura.
+
+## 23. Recomendação
+
+# CONDITIONAL GO FOR SPIKE
+
+A combinação é **materialmente melhor** que a anterior. A diferença essencial não é de licença — é de desenho: **trocar a CNN anti-spoof por um challenge temporal remove o pior blocker jurídico da fase**, porque não usa modelo treinado em dataset restrito. Isso foi bem pensado.
+
+Nenhum dos três componentes está BLOCKED pela régua correta. Dois têm concessão explícita sobre o artefato (SFace Apache-2.0; YuNet MIT com detentor nomeado) e um não tem restrição alguma (MediaPipe).
+
+**As condições, e são condições de verdade:**
+
+1. **A avaliação de liveness roda no servidor** (§20.1, variante A). Sem isto, é um booleano do navegador e o spike não vale a pena.
+2. **As duas perguntas de licença de §22.1 e §22.2 são enviadas antes de o resultado do spike virar decisão comercial.** O spike pode começar em paralelo — é trabalho técnico, não distribuição de produto.
+3. **O rótulo é `ACTIVE_LIVENESS_BASIC`** em documentação, contrato e interface. Sem "certificado", "à prova de fraude" ou "biometria bancária".
+4. **O AL1 permanece** como está e como fallback conforme política da organização.
+
+**O que continua bloqueando a execução do spike, e não é licença:** não há Docker, WSL nem Docker Desktop nesta máquina (verificado), e os testes de apresentação — foto impressa, tela, replay — exigem câmera e uma pessoa. Esses dois permanecem exatamente como no ADR 0002.
+
+**Portanto:** GO na decisão de tecnologia, condicionado aos quatro itens acima. A execução do spike depende de um ambiente que ainda não existe.
+
+## 24. Fontes desta investigação
+
+- SFace LICENSE — https://github.com/opencv/opencv_zoo/blob/main/models/face_recognition_sface/LICENSE
+- SFace README — https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface
+- YuNet LICENSE — https://github.com/opencv/opencv_zoo/blob/main/models/face_detection_yunet/LICENSE
+- YuNet README — https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet
+- Treinamento do YuNet — https://github.com/ShiqiYu/libfacedetection.train
+- WIDER FACE, card do dataset — https://huggingface.co/datasets/CUHK-CSE/wider_face
+- MediaPipe Face Landmarker — https://developers.google.com/edge/mediapipe/solutions/vision/face_landmarker
+- MediaPipe, repositório — https://github.com/google-ai-edge/mediapipe
+- Issue #2595 — https://github.com/google-ai-edge/mediapipe/issues/2595
+- Issue #2709 — https://github.com/google-ai-edge/mediapipe/issues/2709
