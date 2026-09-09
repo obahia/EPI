@@ -376,3 +376,42 @@ Além do caminho feliz, prova o que só o navegador podia provar: o link que o p
 **Um bug real, achado só por olhar a captura.** As duas tabelas (5 e 6 colunas) estavam num grid de duas colunas e transbordavam o painel: a coluna **Ação** — com os únicos botões de remover e cancelar da página — ficava fora da área visível, atrás de um scroll horizontal que ninguém procuraria. Todas as asserções de texto passavam, porque `innerText` contém o texto cortado igual. Corrigido empilhando os painéis.
 
 **E uma lição sobre medir antes de concluir.** Uma execução acusou "revogar não atualiza a lista", e eu diagnostiquei `revalidatePath` não atualizando o router do cliente, com base no guia da versão. Estava errado: a causa era o meu locator, que casava `<tr>` da tabela de **Convites** — onde o mesmo e-mail aparece e nunca some. Com o locator restrito ao painel de membros, passa com `revalidatePath` sozinho; medido de novo com e sem `refresh()`, e o `refresh()` não muda nada. O código ficou como estava. Duas execuções anteriores também mentiram por outro motivo: rebuild com o servidor rodando troca o `.next` embaixo do processo, a página vem sem CSS nem JS, e um formulário sem JS vira POST com navegação completa — o caso que esconde justamente esse tipo de bug.
+
+---
+
+## FASE H — Break-glass de plataforma (2026-09-09)
+
+Escopo: dar código às duas tabelas que existiam sem uso desde a FASE 0, e com isso fechar o buraco que a Fase G registrou — cliente sem administrador não tinha caminho de recuperação dentro do produto.
+
+### Decisão pedida ao usuário, e a resposta
+
+O único fork que mudava materialmente o que se constrói: o que o suporte pode **fazer** dentro do tenant. Resposta: **leitura + uma escrita de resgate**. Somente-leitura deixaria o autobloqueio sem solução; escrita ampla tornaria cada ação do suporte indistinguível de uma ação do próprio cliente.
+
+### O que foi construído
+
+- `authz.has_live_platform_grant` e `app.assert_platform_grant` — a guarda por onde passa toda leitura e a única escrita.
+- `api.grant_platform_access` / `revoke_platform_access`, `api.grant_platform_admin` / `revoke_platform_admin`, `api.platform_list_admins`, `api.platform_search_organizations`.
+- Leituras sob concessão: `platform_organization_overview`, `platform_audit_events`, `platform_list_members`.
+- A escrita de resgate: `api.platform_grant_org_admin`.
+- Transparência: `api.list_platform_access_grants` + `/settings/acesso-do-suporte`.
+- Console: `/plataforma` e `/plataforma/<organizationId>`.
+- Eventos novos, todos na cadeia do tenant afetado com `actor_kind = 'PLATFORM'`: `PLATFORM_ACCESS_GRANTED`, `PLATFORM_ACCESS_USED`, `PLATFORM_ACCESS_REVOKED`, `PLATFORM_ORG_ADMIN_GRANTED`.
+
+### Dois bugs meus, pegos antes do CI
+
+**`STABLE` numa função que escreve.** As três leituras sob concessão chamam `app.assert_platform_grant`, que faz `UPDATE` no contador e, na primeira vez, escreve na auditoria. Declarar qualquer uma delas `STABLE` faz o Postgres recusar esse `UPDATE` em tempo de execução, **em toda chamada** — a mesma forma de falha "quebrado para todo mundo, não num caso de borda" que este projeto já embarcou duas vezes. Corrigido antes de rodar.
+
+**`plan(27)` com 32 asserções escritas.** O lint de pgTAP pegou, que é exatamente para isso que ele existe.
+
+Um terceiro achado foi de desenho, não bug: o bloco `org_wide_grant_required` em `platform_grant_org_admin` era código morto — `assert_platform_grant(org, NULL)` já só casa concessão com `company_id IS NULL`. Removido: código morto num caminho de segurança é pior que nenhum, porque sugere que a proteção mora onde ela não mora.
+
+### Estado de verificação
+
+| Camada | Estado |
+|---|---|
+| `typecheck` / `lint` / 218 testes unitários / build | verde local; `/plataforma`, `/plataforma/[organizationId]` e `/settings/acesso-do-suporte` presentes |
+| `db:check:local` (PGlite) | a migration aplica de zero |
+| pgTAP `240_platform_break_glass.sql` (32 asserções) | **escrita, ainda não executada** — exige Postgres real |
+| E2E ao vivo / UI | **não** |
+
+As duas últimas linhas mudam quando houver evidência, não antes.

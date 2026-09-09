@@ -48,6 +48,22 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* Phase H. The transparency half of break-glass. Deliberately a card the customer
+          finds on their own settings page rather than something surfaced only when access
+          happens: "you can check at any time" is a different promise from "we will tell
+          you". */}
+      <Card className="max-w-lg">
+        <CardHeader>
+          <CardTitle>{t.settings.supportAccessCardTitle}</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col items-start gap-3">
+          <p className="text-[13px] text-muted-foreground">{t.settings.supportAccessCardDescription}</p>
+          <Button asChild>
+            <Link href="/settings/acesso-do-suporte">{t.settings.supportAccessCardLink}</Link>
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* Phase G. Also reachable from the sidebar, which shows the row to ORG_ADMIN and
           COMPANY_ADMIN -- the two roles that hold membership.manage. This card is here as
           well because /settings is where an ORG_ADMIN already comes to change what the

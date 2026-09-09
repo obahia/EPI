@@ -556,6 +556,10 @@ const pt = {
     teamCardDescription:
       "Quem administra o Selo nesta organização. O acesso vem sempre de um convite aceito pela própria pessoa.",
     teamCardLink: "Gerenciar equipe",
+    supportAccessCardTitle: "Acesso do suporte",
+    supportAccessCardDescription:
+      "Quem do Selo já teve autorização para ver os dados desta organização, por quê, por quanto tempo, e se chegou a usar.",
+    supportAccessCardLink: "Ver acessos do suporte",
     earlyReplacementPolicyLabel: "Troca antecipada de EPI",
     earlyReplacementPolicyAllow: "Permitir sem aviso",
     earlyReplacementPolicyWarn: "Avisar e exigir confirmação",
@@ -1372,6 +1376,10 @@ const en: typeof pt = {
     teamCardDescription:
       "Who administers Selo in this organization. Access always comes from an invitation the person accepts themselves.",
     teamCardLink: "Manage members",
+    supportAccessCardTitle: "Support access",
+    supportAccessCardDescription:
+      "Who at Selo has been authorised to view this organization's data, why, for how long, and whether they used it.",
+    supportAccessCardLink: "View support access",
     earlyReplacementPolicyLabel: "Early PPE replacement",
     earlyReplacementPolicyAllow: "Allow without a warning",
     earlyReplacementPolicyWarn: "Warn and require confirmation",

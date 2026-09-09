@@ -80,7 +80,7 @@ Papéis de `membership` (4, não 5 — "Employee" não é um papel de usuário, 
 
 | Papel do enunciado | Papel no modelo |
 |---|---|
-| Platform Super Admin | `app.platform_admins` — tabela separada, **não** um `membership`, **não** um bypass de RLS. Acesso de suporte é *break-glass*: `app.platform_access_grants`, com motivo obrigatório (≥20 caracteres), aprovador ≠ solicitante (regra dos quatro olhos), teto de 72h, e cada concessão grava um evento `PLATFORM_ACCESS_GRANTED` **na cadeia de auditoria do próprio tenant afetado** — o cliente pode ver quem da nossa equipe acessou seus dados e por quê. |
+| Platform Super Admin | (implementado na Fase H — ver §27) `app.platform_admins` — tabela separada, **não** um `membership`, **não** um bypass de RLS. Acesso de suporte é *break-glass*: `app.platform_access_grants`, com motivo obrigatório (≥20 caracteres), aprovador ≠ solicitante (regra dos quatro olhos), teto de 72h, e cada concessão grava um evento `PLATFORM_ACCESS_GRANTED` **na cadeia de auditoria do próprio tenant afetado** — o cliente pode ver quem da nossa equipe acessou seus dados e por quê. |
 | Partner Admin | `ORG_ADMIN` de uma organização `kind='PARTNER'`. |
 | Company Admin | `ORG_ADMIN` de uma organização `kind='DIRECT'`, ou `COMPANY_ADMIN` com `company_id` fixo sob um parceiro. |
 | SST Operator | `SST_OPERATOR` — CRUD de funcionários/EPIs/entregas conforme permissão, sem gestão de membros ou faturamento. |
@@ -713,3 +713,35 @@ Trocar o papel de alguém é verificado contra **os dois** papéis, o novo e o a
 **Nenhum acesso entre organizações.** A §3 chama o modelo de dois níveis e um dono de não negociável e rejeita predicados de ancestralidade na RLS como "historicamente a causa mais comum de vazamento entre tenants". Nada aqui adiciona um predicado que cruze organização. `partner_relationships` do roadmap de expansão continua não construída; convidar, escopar e revogar é necessário existindo ela ou não.
 
 **Nenhum envio de e-mail.** O projeto não tem provedor transacional configurado (ver a nota da FASE 0 em `(auth)/login/actions.ts`), então o link é devolvido a quem convidou, exibido uma única vez, para ser repassado por um canal em que as duas pessoas já confiam. É uma limitação declarada, não um toast de "convite enviado" que mentiria para quem esperaria um e-mail que nunca chega.
+
+---
+
+## 27. Break-glass de plataforma (Fase H)
+
+As duas tabelas existem desde a FASE 0 e passaram sete fases sem uma linha de código. Isso significava duas coisas ao mesmo tempo: nossa equipe não tinha caminho sancionado para olhar os dados de um tenant quando o cliente pedia ajuda, e — como a Fase G teve de registrar explicitamente — um cliente que perdesse o último `ORG_ADMIN` de escopo organizacional não tinha **nenhum** caminho de recuperação dentro do produto. O remédio para os dois era SQL escrito à mão contra produção, que é exatamente o que este conjunto de tabelas existe para tornar desnecessário.
+
+### A decisão que sustenta o resto: isto não é extensão da RLS
+
+A §5 já dizia que break-glass não pode ser bypass de RLS. Há uma segunda razão, mais afiada, e ela vem do próprio catálogo de eventos da §13: ele lista `PLATFORM_ACCESS_USED` ao lado de `PLATFORM_ACCESS_GRANTED`. Uma policy de RLS **não escreve** linha de auditoria — policies são predicados de leitura. Se break-glass funcionasse ensinando `auth_ctx.company_ids()` sobre concessões, o cliente só poderia ser informado de que o acesso foi **autorizado**, nunca de que foi **usado**. A diferença importa para quem é dono do dado.
+
+Então os cinco helpers `auth_ctx.*` seguem byte a byte iguais, toda policy existente se comporta exatamente como antes, e acesso de plataforma é um conjunto pequeno e explícito de funções `SECURITY DEFINER` que checam uma concessão viva e registram o uso. **Um bug neste arquivo não consegue alargar nenhuma policy existente, porque nenhuma policy existente consulta nada dele.**
+
+As funções ficam em `api`, não num schema novo: a Fase F custou tempo real descobrindo que expor schema ao PostgREST no projeto hospedado é ajuste de dashboard invisível às migrations, e um schema a mais não compraria nada — a guarda está dentro de cada função, nunca no nome do schema.
+
+### O que uma concessão abre
+
+Leitura: contagens da organização (incluindo `live_org_admin_count`, que é como se enxerga um autobloqueio sem ler um único registro de funcionário), quem tem acesso ao painel, e a trilha de auditoria do próprio tenant. **Nenhum registro de funcionário, nenhum CPF** — e vale dizer de onde vem essa propriedade: ela é **herdada** de `audit.audit_events`, cujo próprio comentário afirma que selfie, biometria, segredo, token completo ou CPF desnecessário nunca entram em `data`. Se isso deixar de ser verdade, `api.platform_audit_events` vira uma janela para o que for colocado lá.
+
+Escrita: **uma só**. `api.platform_grant_org_admin` promove a `ORG_ADMIN` de escopo organizacional alguém que a organização **já admitiu**. O suporte nunca introduz uma pessoa nova na conta de um cliente: se ninguém tem membership viva, não há quem promover e a função recusa em vez de inventar um membro. O raio de dano fica em "um colega que já estava lá virou admin", que o cliente vê e desfaz, em vez de "um estranho apareceu na nossa conta".
+
+### O compromisso que este desenho assume, declarado
+
+`PLATFORM_ACCESS_USED` é escrito **uma vez por concessão**, na primeira leitura — não a cada leitura. Registrar cada uma serializaria no `audit.chain_heads` daquela organização e soterraria o histórico do cliente sob tráfego do nosso suporte. A concessão já é limitada a 72h, então "foi usada, a partir de T", mais um contador em `use_count`/`last_used_at`, carrega o fato que importa sem esse custo. É a única coisa que este mecanismo **não** registra por ação, e está dito aqui em vez de descoberto depois.
+
+### Bootstrap
+
+Nenhuma função cria o primeiro `SUPER`: uma função capaz de cunhar o primeiro platform admin seria uma função capaz de cunhar poder de plataforma a partir de uma conta comum. O primeiro é um `insert` manual em `app.platform_admins`, feito uma vez, por quem tem acesso ao banco. A partir daí `api.grant_platform_admin` (só `SUPER`) cuida do resto, e `api.revoke_platform_admin` encerra junto toda concessão viva da pessoa — caso contrário o cadastro diria "não é mais da equipe" enquanto a concessão ainda diria "pode ler o tenant 7".
+
+### A metade que torna tudo isto defensável
+
+`/settings/acesso-do-suporte`: o cliente vê **quem** do Selo recebeu autorização, **quem aprovou**, **o motivo** (o texto é obrigatório, mínimo de 20 caracteres, e vai para a trilha dele), o **período**, e se chegou a ser **usada**. Sem essa tela o resto é uma porta dos fundos com papelada que ninguém de fora consegue ler.

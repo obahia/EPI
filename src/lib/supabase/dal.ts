@@ -2451,3 +2451,274 @@ export const getOrgInvitations = cache(async (organizationId: string): Promise<O
     status: row["status"] as unknown as InvitationStatus,
   }));
 });
+
+// ---------------------------------------------------------------------------------------
+// Phase H -- platform break-glass.
+//
+// Every read below is refused by Postgres unless the caller holds a live grant, and the
+// grant-scoped ones record the access in the affected tenant's own audit chain. Nothing here
+// consults auth_ctx.*, so none of it can widen an existing RLS policy.
+// ---------------------------------------------------------------------------------------
+
+export type PlatformAdminLevel = "SUPPORT" | "ENGINEER" | "SUPER";
+
+/** The caller's own platform level, or null if they are not staff. Gates the console. */
+export const getMyPlatformLevel = cache(async (): Promise<PlatformAdminLevel | null> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return null;
+
+  const supabase = await createClient();
+  // app.platform_admins is readable only for one's own row -- the FASE 0 policy
+  // platform_admins_select_self -- so this cannot enumerate the vendor's staff.
+  const { data, error } = await supabase
+    .schema("api")
+    .from("platform_admins")
+    .select("level, revoked_at")
+    .maybeSingle();
+
+  if (error || !data) return null;
+  const row = data as { level: PlatformAdminLevel; revoked_at: string | null };
+  return row.revoked_at ? null : row.level;
+});
+
+export type PlatformGrant = {
+  grantId: string;
+  organizationId: string;
+  organizationName: string;
+  companyId: string | null;
+  reason: string;
+  ticketRef: string | null;
+  grantedAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  useCount: number;
+};
+
+export const getMyPlatformGrants = cache(async (): Promise<PlatformGrant[]> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.schema("api").rpc("my_platform_grants");
+  if (error || !data) return [];
+  return (data as Record<string, never>[]).map((row) => ({
+    grantId: row["grant_id"] as unknown as string,
+    organizationId: row["organization_id"] as unknown as string,
+    organizationName: row["organization_name"] as unknown as string,
+    companyId: row["company_id"] as unknown as string | null,
+    reason: row["reason"] as unknown as string,
+    ticketRef: row["ticket_ref"] as unknown as string | null,
+    grantedAt: row["granted_at"] as unknown as string,
+    expiresAt: row["expires_at"] as unknown as string,
+    revokedAt: row["revoked_at"] as unknown as string | null,
+    useCount: (row["use_count"] as unknown as number) ?? 0,
+  }));
+});
+
+export type PlatformOrganization = {
+  organizationId: string;
+  legalName: string;
+  cnpj: string;
+  kind: string;
+  companyCount: number;
+  createdAt: string;
+};
+
+export const searchPlatformOrganizations = cache(
+  async (query: string | null): Promise<PlatformOrganization[]> => {
+    const session = await verifySession();
+    if (!session.isAuthenticated) return [];
+
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .schema("api")
+      .rpc("platform_search_organizations", { p_query: query, p_limit: 25 });
+    if (error || !data) return [];
+    return (data as Record<string, never>[]).map((row) => ({
+      organizationId: row["organization_id"] as unknown as string,
+      legalName: row["legal_name"] as unknown as string,
+      cnpj: row["cnpj"] as unknown as string,
+      kind: row["kind"] as unknown as string,
+      companyCount: Number(row["company_count"] ?? 0),
+      createdAt: row["created_at"] as unknown as string,
+    }));
+  },
+);
+
+export type PlatformOverview = {
+  organizationId: string;
+  legalName: string;
+  kind: string;
+  companyCount: number;
+  employeeCount: number;
+  memberCount: number;
+  liveOrgAdminCount: number;
+  deliveryCount: number;
+  pendingDeliveryCount: number;
+  lastAuditAt: string | null;
+};
+
+/** Counts, never names. `liveOrgAdminCount === 0` is exactly the lockout this phase exists
+ * to make recoverable. Not wrapped in cache(): the underlying RPC records the access, so
+ * memoising it would quietly under-count what support actually did. */
+export async function getPlatformOverview(organizationId: string): Promise<PlatformOverview | null> {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return null;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .rpc("platform_organization_overview", { p_organization_id: organizationId });
+  if (error || !data) return null;
+  const row = (data as Record<string, never>[])[0];
+  if (!row) return null;
+  return {
+    organizationId: row["organization_id"] as unknown as string,
+    legalName: row["legal_name"] as unknown as string,
+    kind: row["kind"] as unknown as string,
+    companyCount: Number(row["company_count"] ?? 0),
+    employeeCount: Number(row["employee_count"] ?? 0),
+    memberCount: Number(row["member_count"] ?? 0),
+    liveOrgAdminCount: Number(row["live_org_admin_count"] ?? 0),
+    deliveryCount: Number(row["delivery_count"] ?? 0),
+    pendingDeliveryCount: Number(row["pending_delivery_count"] ?? 0),
+    lastAuditAt: row["last_audit_at"] as unknown as string | null,
+  };
+}
+
+export type PlatformAuditEvent = {
+  id: string;
+  seq: number;
+  eventType: string;
+  actorKind: string;
+  actorUserId: string | null;
+  entityTable: string | null;
+  entityId: string | null;
+  createdAt: string;
+};
+
+export async function getPlatformAuditEvents(organizationId: string): Promise<PlatformAuditEvent[]> {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .rpc("platform_audit_events", { p_organization_id: organizationId, p_limit: 100 });
+  if (error || !data) return [];
+  // The RPC returns each event's `data` payload; this drops it. Nothing in the console needs
+  // it, and not carrying it into a rendered page is the cheap half of keeping support access
+  // narrow -- the expensive half is the database refusing the call without a live grant.
+  return (data as Record<string, never>[]).map((row) => ({
+    id: row["id"] as unknown as string,
+    seq: Number(row["seq"] ?? 0),
+    eventType: row["event_type"] as unknown as string,
+    actorKind: row["actor_kind"] as unknown as string,
+    actorUserId: row["actor_user_id"] as unknown as string | null,
+    entityTable: row["entity_table"] as unknown as string | null,
+    entityId: row["entity_id"] as unknown as string | null,
+    createdAt: row["created_at"] as unknown as string,
+  }));
+}
+
+export type PlatformMember = {
+  membershipId: string;
+  userId: string;
+  fullName: string;
+  email: string;
+  role: Membership["role"];
+  companyId: string | null;
+  acceptedAt: string | null;
+};
+
+export async function getPlatformMembers(organizationId: string): Promise<PlatformMember[]> {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .schema("api")
+    .rpc("platform_list_members", { p_organization_id: organizationId });
+  if (error || !data) return [];
+  return (data as Record<string, never>[]).map((row) => ({
+    membershipId: row["membership_id"] as unknown as string,
+    userId: row["user_id"] as unknown as string,
+    fullName: row["full_name"] as unknown as string,
+    email: row["email"] as unknown as string,
+    role: row["role"] as unknown as Membership["role"],
+    companyId: row["company_id"] as unknown as string | null,
+    acceptedAt: row["accepted_at"] as unknown as string | null,
+  }));
+}
+
+export type VendorAccessGrant = {
+  grantId: string;
+  adminName: string;
+  adminEmail: string;
+  grantedByName: string;
+  companyId: string | null;
+  reason: string;
+  ticketRef: string | null;
+  grantedAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  firstUsedAt: string | null;
+  lastUsedAt: string | null;
+  useCount: number;
+};
+
+/** The CUSTOMER's own view of vendor access to their data. This is the transparency half of
+ * break-glass; without it the rest is a back door with paperwork nobody outside can read. */
+export const getVendorAccessGrants = cache(
+  async (organizationId: string): Promise<VendorAccessGrant[]> => {
+    const session = await verifySession();
+    if (!session.isAuthenticated) return [];
+
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .schema("api")
+      .rpc("list_platform_access_grants", { p_organization_id: organizationId });
+    if (error || !data) return [];
+    return (data as Record<string, never>[]).map((row) => ({
+      grantId: row["grant_id"] as unknown as string,
+      adminName: row["admin_name"] as unknown as string,
+      adminEmail: row["admin_email"] as unknown as string,
+      grantedByName: row["granted_by_name"] as unknown as string,
+      companyId: row["company_id"] as unknown as string | null,
+      reason: row["reason"] as unknown as string,
+      ticketRef: row["ticket_ref"] as unknown as string | null,
+      grantedAt: row["granted_at"] as unknown as string,
+      expiresAt: row["expires_at"] as unknown as string,
+      revokedAt: row["revoked_at"] as unknown as string | null,
+      firstUsedAt: row["first_used_at"] as unknown as string | null,
+      lastUsedAt: row["last_used_at"] as unknown as string | null,
+      useCount: (row["use_count"] as unknown as number) ?? 0,
+    }));
+  },
+);
+
+export type PlatformAdminRow = {
+  userId: string;
+  fullName: string;
+  email: string;
+  level: PlatformAdminLevel;
+  revokedAt: string | null;
+};
+
+/** The vendor's own staff, visible to the vendor's own staff. Four eyes only works if you
+ * can see who the other two belong to. Never returns a customer's users. */
+export const getPlatformAdmins = cache(async (): Promise<PlatformAdminRow[]> => {
+  const session = await verifySession();
+  if (!session.isAuthenticated) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.schema("api").rpc("platform_list_admins");
+  if (error || !data) return [];
+  return (data as Record<string, never>[]).map((row) => ({
+    userId: row["user_id"] as unknown as string,
+    fullName: row["full_name"] as unknown as string,
+    email: row["email"] as unknown as string,
+    level: row["level"] as unknown as PlatformAdminLevel,
+    revokedAt: row["revoked_at"] as unknown as string | null,
+  }));
+});

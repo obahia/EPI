@@ -12,6 +12,11 @@ export function describeRpcError(error: PostgrestError, fallback: string): strin
     case "42710": // already_onboarded
       return "Sua conta já está associada a uma organização.";
     case "42501": // insufficient_privilege
+      // Break-glass gives ONE signal for "not staff", "no grant" and "grant expired". The
+      // caller learns that they cannot read this tenant, and nothing about why.
+      if (error.message?.includes("no_live_platform_grant")) {
+        return "Nenhuma concessão de acesso ativa para esta organização.";
+      }
       return "Você não tem permissão para executar esta ação.";
     case "23505": // unique_violation (cpf_already_registered, ca_already_registered, duplicate CNPJ, etc.)
       if (error.message?.includes("cpf_already_registered")) {
@@ -77,7 +82,19 @@ export function describeRpcError(error: PostgrestError, fallback: string): strin
         return "Informe um e-mail válido.";
       }
       if (error.message?.includes("invalid_ttl")) {
-        return "Prazo de validade inválido para o convite.";
+        return "Prazo de validade inválido.";
+      }
+      if (error.message?.includes("four_eyes_required")) {
+        return "Ninguém concede acesso de plataforma a si mesmo — peça a outra pessoa da equipe.";
+      }
+      if (error.message?.includes("reason_too_short")) {
+        return "Descreva o motivo com pelo menos 20 caracteres — é o texto que o cliente vai ler.";
+      }
+      if (error.message?.includes("company_not_in_organization")) {
+        return "Esta empresa não pertence a essa organização.";
+      }
+      if (error.message?.includes("cannot_revoke_self")) {
+        return "Você não pode remover a si mesmo da equipe de plataforma.";
       }
       return fallback;
     case "22023": // invalid_text_representation / raised domain-validation errors
@@ -102,6 +119,12 @@ export function describeRpcError(error: PostgrestError, fallback: string): strin
       // Deliberately one message for unknown, expired, revoked, already-accepted and
       // wrong-recipient: api.accept_invitation raises the same signal for all five, and
       // distinguishing them here would undo that on the way out.
+      if (error.message?.includes("not_a_platform_admin")) {
+        return "Esta pessoa não faz parte da equipe de plataforma.";
+      }
+      if (error.message?.includes("not_a_member")) {
+        return "Esta pessoa não tem acesso a esta organização. O suporte só pode promover alguém que a organização já admitiu.";
+      }
       if (error.message?.includes("invitation_not_available")) {
         return "Este convite não está mais disponível. Peça um novo para quem administra a organização.";
       }
